@@ -1,0 +1,6045 @@
+================================================================================
+             x86-64 ASSEMBLY — FULL CRASH COURSE / MASTER ASCII NOTE
+                   WINDOWS + LINUX + macOS (Intel x86-64)
+                           NASM + C/C++ INTEROP
+================================================================================
+
+
+===============================================================================
+00. BIG PICTURE
+===============================================================================
+
+C / C++
+   |
+   v
+Compiler
+   |
+   +----> Machine Code / Assembly
+   |
+   v
+Object File
+   |
+   +----> Static Library
+   |          .lib / .a
+   |
+   v
+Linker
+   |
+   v
+Executable
+   |
+   +-----------------------------+
+   |                             |
+ Windows                       Linux/macOS
+ PE/COFF                       ELF / Mach-O
+
+
+IMPORTANT:
+
+ABI is NOT simply:
+
+    C -> Compiler -> Assembly -> ABI -> Object
+
+Instead ABI is a CONTRACT used across the whole binary interface.
+
+ABI defines things such as:
+
+    - argument passing
+    - return values
+    - register preservation
+    - stack layout
+    - stack alignment
+    - structure passing
+    - structure return
+    - symbol naming
+    - object/binary conventions
+    - calling convention
+
+
+===============================================================================
+01. CPU BASICS
+===============================================================================
+
+CPU mainly works with:
+
+    Registers
+    Memory
+    Instructions
+    Flags
+
+Example:
+
+    mov eax, 10
+    add eax, 20
+
+Conceptually:
+
+    EAX = 10
+    EAX = EAX + 20
+
+Final:
+
+    EAX = 30
+
+
+===============================================================================
+02. BITS / BYTES
+===============================================================================
+
+    1 bit   = 0 or 1
+    8 bits  = 1 byte
+    16 bits = 2 bytes
+    32 bits = 4 bytes
+    64 bits = 8 bytes
+
+Common sizes:
+
+    BYTE    = 8
+    WORD    = 16
+    DWORD   = 32
+    QWORD   = 64
+
+Larger SIMD memory sizes:
+
+    OWORD   = 128
+    YWORD   = 256
+    ZWORD   = 512
+
+
+===============================================================================
+03. GENERAL PURPOSE REGISTERS
+===============================================================================
+
+Register family       64-bit     32-bit     16-bit     8-bit
+
+Accumulator           RAX        EAX        AX         AL
+Base                  RBX        EBX        BX         BL
+Counter               RCX        ECX        CX         CL
+Data                  RDX        EDX        DX         DL
+
+Source Index          RSI        ESI        SI         SIL
+Destination Index     RDI        EDI        DI         DIL
+
+Register 8            R8         R8D        R8W        R8B
+Register 9            R9         R9D        R9W        R9B
+Register 10           R10        R10D       R10W       R10B
+Register 11           R11        R11D       R11W       R11B
+Register 12           R12        R12D       R12W       R12B
+Register 13           R13        R13D       R13W       R13B
+Register 14           R14        R14D       R14W       R14B
+Register 15           R15        R15D       R15W       R15B
+
+
+IMPORTANT:
+
+    RAX
+     |
+     +-- EAX
+           |
+           +-- AX
+                |
+                +-- AL
+
+These are NOT four independent registers.
+
+They are different-width views of the same register family.
+
+
+===============================================================================
+04. HIGH 8-BIT REGISTERS
+===============================================================================
+
+Legacy registers also have:
+
+    AH
+    BH
+    CH
+    DH
+
+Example:
+
+    AX = AH:AL
+
+    +----------------+--------+
+    |       AH       |   AL   |
+    |     8 bits     | 8 bits |
+    +----------------+--------+
+
+IMPORTANT:
+
+AH/BH/CH/DH have encoding restrictions in 64-bit mode.
+
+For modern x86-64 code, low-byte registers such as:
+
+    AL
+    BL
+    CL
+    DL
+    SIL
+    DIL
+    R8B ... R15B
+
+are generally easier to use.
+
+
+===============================================================================
+05. 32-BIT WRITE ZERO-EXTENSION
+===============================================================================
+
+VERY IMPORTANT x86-64 RULE:
+
+Writing a 32-bit GPR generally zeroes the upper 32 bits.
+
+Example:
+
+    mov rax, 0xFFFFFFFFFFFFFFFF
+    mov eax, 10
+
+After:
+
+    RAX = 0x000000000000000A
+
+
+But writing 16-bit does NOT zero upper bits:
+
+    mov rax, 0xFFFFFFFFFFFFFFFF
+    mov ax, 10
+
+Result:
+
+    RAX = 0xFFFFFFFFFFFF000A
+
+
+Writing 8-bit does NOT zero upper bits either.
+
+
+===============================================================================
+06. SPECIAL REGISTERS
+===============================================================================
+
+    RSP      Stack Pointer
+    RBP      Base/Frame Pointer
+    RIP      Instruction Pointer
+    RFLAGS   Flags register
+
+
+RSP:
+
+    points to current top of stack.
+
+
+RBP:
+
+    traditionally used as stack-frame/base pointer.
+
+    Modern compilers may omit frame pointers.
+
+
+RIP:
+
+    contains instruction pointer.
+
+    x86-64 supports RIP-relative addressing:
+
+        mov rax, [rel variable]
+
+
+===============================================================================
+07. FLAGS
+===============================================================================
+
+RFLAGS contains many status/control flags.
+
+Important flags:
+
+    CF = Carry Flag
+    PF = Parity Flag
+    AF = Auxiliary Carry
+    ZF = Zero Flag
+    SF = Sign Flag
+    OF = Overflow Flag
+    DF = Direction Flag
+    IF = Interrupt Enable
+
+
+Example:
+
+    cmp eax, ebx
+    je equal
+
+CMP affects flags.
+
+JE checks:
+
+    ZF = 1
+
+
+===============================================================================
+08. INTEGER DATA TYPES
+===============================================================================
+
+C/C++ typical x86-64 sizes:
+
+    char                8-bit
+    signed char         8-bit
+    unsigned char       8-bit
+
+    short               16-bit
+    unsigned short      16-bit
+
+    int                 32-bit
+    unsigned int        32-bit
+
+    long long           64-bit
+    unsigned long long  64-bit
+
+    pointer             64-bit
+
+IMPORTANT:
+
+    "long" is platform-dependent.
+
+Windows x64:
+
+    long = 32-bit
+
+Linux x86-64:
+
+    long = 64-bit
+
+macOS x86-64:
+
+    long = 64-bit
+
+
+===============================================================================
+09. FLOATING POINT TYPES
+===============================================================================
+
+Typical:
+
+    float       = 32-bit
+    double      = 64-bit
+
+long double:
+
+    ABI/platform dependent.
+
+
+Floating point normally uses XMM registers under modern x86-64 ABIs.
+
+
+===============================================================================
+10. NASM DATA DIRECTIVES
+===============================================================================
+
+    DB      Define Byte
+    DW      Define Word
+    DD      Define Doubleword
+    DQ      Define Quadword
+    DT      Define 10-byte value
+    DO      Define OWORD
+    DY      Define YWORD
+    DZ      Define ZWORD
+
+
+Examples:
+
+    db 10
+    dw 1000
+    dd 100000
+    dq 10000000000
+
+
+===============================================================================
+11. NASM MEMORY SIZE SPECIFIERS
+===============================================================================
+
+    byte
+    word
+    dword
+    qword
+    oword
+    yword
+    zword
+
+
+Examples:
+
+    mov byte  [rax], 10
+    mov word  [rax], 10
+    mov dword [rax], 10
+    mov qword [rax], 10
+
+
+===============================================================================
+12. NASM SECTIONS
+===============================================================================
+
+Common:
+
+    section .text
+        executable code
+
+    section .data
+        initialized writable data
+
+    section .bss
+        uninitialized / zero-initialized storage
+
+
+Example:
+
+    section .data
+
+    number dq 123
+
+
+    section .bss
+
+    buffer resb 1024
+
+
+    section .text
+
+    global main
+
+
+===============================================================================
+13. NASM RESERVATION DIRECTIVES
+===============================================================================
+
+    RESB    reserve bytes
+    RESW    reserve words
+    RESD    reserve dwords
+    RESQ    reserve qwords
+
+Example:
+
+    buffer resb 1024
+
+Means:
+
+    reserve 1024 bytes.
+
+
+===============================================================================
+14. NASM STRINGS
+===============================================================================
+
+Example:
+
+    message db "Hello", 0
+
+The bytes are approximately:
+
+    H
+    e
+    l
+    l
+    o
+    0
+
+
+C strings normally use:
+
+    null terminator = 0
+
+
+===============================================================================
+15. NASM CONSTANTS
+===============================================================================
+
+Decimal:
+
+    123
+
+Hex:
+
+    0x7B
+
+Binary:
+
+    0b1111011
+
+Octal:
+
+    0o173
+
+Character:
+
+    'A'
+
+String:
+
+    "Hello"
+
+
+===============================================================================
+16. MEMORY ADDRESSING
+===============================================================================
+
+General x86 addressing:
+
+    base + index * scale + displacement
+
+
+NASM syntax:
+
+    [base + index*scale + displacement]
+
+
+Scale can be:
+
+    1
+    2
+    4
+    8
+
+
+Example:
+
+    mov eax, [rax + rcx*4 + 8]
+
+
+Address:
+
+    RAX
+      +
+    RCX * 4
+      +
+    8
+
+
+===============================================================================
+17. COMMON ADDRESSING FORMS
+===============================================================================
+
+    [rax]
+
+    [rax + 8]
+
+    [rax + rcx]
+
+    [rax + rcx*4]
+
+    [rax + rcx*8 + 16]
+
+
+Array example:
+
+    int array[];
+
+    array[index]
+
+usually corresponds conceptually to:
+
+    [base + index*4]
+
+because:
+
+    sizeof(int) = 4
+
+
+===============================================================================
+18. POINTERS
+===============================================================================
+
+A pointer is an address.
+
+On x86-64:
+
+    pointer = typically 64-bit
+
+
+Example C:
+
+    int *p;
+
+
+Conceptually:
+
+    p = address
+
+
+NASM:
+
+    mov rax, [p]       ; load data from memory
+    lea rax, [p]       ; calculate/load address
+
+
+IMPORTANT:
+
+    mov rax, [p]
+
+means:
+
+    load VALUE at address p
+
+
+    lea rax, [p]
+
+means:
+
+    calculate ADDRESS expression
+
+
+===============================================================================
+19. MOV
+===============================================================================
+
+MOV copies data.
+
+    mov destination, source
+
+
+Examples:
+
+    mov eax, ebx
+
+    mov rax, 123
+
+    mov al, 10
+
+    mov rax, [rbx]
+
+    mov [rbx], rax
+
+
+MOV does not mean mathematical movement.
+
+It means:
+
+    destination = source
+
+
+===============================================================================
+20. LEA
+===============================================================================
+
+LEA = Load Effective Address
+
+Example:
+
+    lea rax, [rbx + rcx*4 + 8]
+
+
+This calculates:
+
+    RAX = RBX + RCX*4 + 8
+
+
+It does NOT load memory from that address.
+
+
+===============================================================================
+21. ARITHMETIC
+===============================================================================
+
+    ADD
+    SUB
+    INC
+    DEC
+    NEG
+
+Examples:
+
+    add eax, ebx
+    sub eax, ebx
+    inc eax
+    dec eax
+    neg eax
+
+
+===============================================================================
+22. MULTIPLICATION
+===============================================================================
+
+    IMUL = signed multiplication
+    MUL  = unsigned multiplication
+
+
+Simple form:
+
+    imul eax, ebx
+
+
+Conceptually:
+
+    EAX = EAX * EBX
+
+
+Special one-operand MUL/IMUL forms use accumulator registers.
+
+
+===============================================================================
+23. DIVISION
+===============================================================================
+
+    DIV  = unsigned division
+    IDIV = signed division
+
+
+64-bit division:
+
+    dividend = RDX:RAX
+
+    divisor = operand
+
+Result:
+
+    quotient  -> RAX
+    remainder -> RDX
+
+
+For signed division:
+
+    cqo
+
+    idiv rbx
+
+
+===============================================================================
+24. EXTENSION
+===============================================================================
+
+Zero extension:
+
+    movzx
+
+
+Sign extension:
+
+    movsx
+
+
+DWORD -> QWORD sign extension:
+
+    movsxd
+
+
+Examples:
+
+    movzx eax, cl
+
+    movsx eax, cl
+
+    movsxd rax, eax
+
+
+===============================================================================
+25. EXTENSION EXAMPLE
+===============================================================================
+
+Suppose:
+
+    CL = 0xFF
+
+
+Unsigned:
+
+    movzx eax, cl
+
+Result:
+
+    EAX = 0x000000FF
+    = 255
+
+
+Signed:
+
+    movsx eax, cl
+
+Result:
+
+    EAX = 0xFFFFFFFF
+    = -1
+
+
+Same bits:
+
+    11111111
+
+Different interpretation:
+
+    unsigned = 255
+    signed   = -1
+
+
+===============================================================================
+26. LOGICAL OPERATIONS
+===============================================================================
+
+    AND
+    OR
+    XOR
+    NOT
+
+
+Examples:
+
+    and eax, ebx
+    or  eax, ebx
+    xor eax, ebx
+    not eax
+
+
+Common zeroing trick:
+
+    xor eax, eax
+
+Result:
+
+    EAX = 0
+
+
+===============================================================================
+27. SHIFTS
+===============================================================================
+
+    SHL
+    SHR
+    SAR
+
+
+SHL:
+
+    logical left shift
+
+
+SHR:
+
+    logical right shift
+
+
+SAR:
+
+    arithmetic right shift
+    preserves sign
+
+
+Example:
+
+    shl eax, 1
+
+roughly:
+
+    eax *= 2
+
+
+===============================================================================
+28. ROTATES
+===============================================================================
+
+    ROL
+    ROR
+    RCL
+    RCR
+
+
+Rotate bits instead of discarding them.
+
+
+===============================================================================
+29. CMP
+===============================================================================
+
+CMP performs subtraction-like flag calculation.
+
+    cmp eax, ebx
+
+
+Conceptually:
+
+    eax - ebx
+
+But result is not stored.
+
+Only flags are affected.
+
+
+===============================================================================
+30. TEST
+===============================================================================
+
+TEST performs:
+
+    AND
+
+for flags without storing the result.
+
+Example:
+
+    test eax, eax
+
+Commonly checks whether:
+
+    EAX == 0
+
+
+Then:
+
+    jz zero
+
+
+===============================================================================
+31. CONDITIONAL JUMPS
+===============================================================================
+
+Equality:
+
+    JE
+    JZ
+
+Not equal:
+
+    JNE
+    JNZ
+
+
+SIGNED:
+
+    JG
+    JGE
+    JL
+    JLE
+
+
+UNSIGNED:
+
+    JA
+    JAE
+    JB
+    JBE
+
+
+Carry:
+
+    JC
+    JNC
+
+
+Overflow:
+
+    JO
+    JNO
+
+
+Sign:
+
+    JS
+    JNS
+
+
+===============================================================================
+32. SIGNED vs UNSIGNED
+===============================================================================
+
+CPU register contains bits.
+
+CPU does not permanently label a register:
+
+    "this is signed"
+
+
+Interpretation comes from instructions.
+
+
+Example:
+
+    0xFFFFFFFF
+
+As unsigned 32-bit:
+
+    4294967295
+
+
+As signed 32-bit:
+
+    -1
+
+
+Therefore:
+
+    signed comparison
+        !=
+    unsigned comparison
+
+
+===============================================================================
+33. JUMP TABLE
+===============================================================================
+
+Instruction       Meaning
+
+    JE/JZ          equal / zero
+    JNE/JNZ        not equal
+
+    JG             signed >
+    JGE            signed >=
+    JL             signed <
+    JLE            signed <=
+
+    JA             unsigned >
+    JAE            unsigned >=
+    JB             unsigned <
+    JBE            unsigned <=
+
+
+===============================================================================
+34. CALL / RET
+===============================================================================
+
+CALL:
+
+    call function
+
+
+Conceptually:
+
+    push return_address
+    jump function
+
+
+RET:
+
+    ret
+
+
+Conceptually:
+
+    pop return_address
+    jump return_address
+
+
+Typical:
+
+    call add
+
+        |
+        v
+
+    add:
+        ...
+        ret
+
+        |
+        v
+
+    caller continues
+
+
+===============================================================================
+35. STACK
+===============================================================================
+
+Stack grows toward LOWER addresses on x86-64.
+
+
+RSP = current stack pointer
+
+
+PUSH:
+
+    push rax
+
+
+conceptually:
+
+    RSP = RSP - 8
+    [RSP] = RAX
+
+
+POP:
+
+    pop rax
+
+
+conceptually:
+
+    RAX = [RSP]
+    RSP = RSP + 8
+
+
+For 64-bit push/pop.
+
+
+===============================================================================
+36. STACK FRAME
+===============================================================================
+
+Traditional function:
+
+    push rbp
+    mov rbp, rsp
+
+    ...
+
+    mov rsp, rbp
+    pop rbp
+    ret
+
+
+Stack frame:
+
+        higher addresses
+              |
+              v
+
+    +-----------------------+
+    | caller data           |
+    +-----------------------+
+    | return address        |
+    +-----------------------+
+    | saved RBP             |
+    +-----------------------+
+    | local variables       |
+    +-----------------------+
+              ^
+              |
+             RSP
+
+
+RBP is optional in optimized code.
+
+
+===============================================================================
+37. STACK ALIGNMENT
+===============================================================================
+
+Stack alignment is part of ABI.
+
+Alignment matters for:
+
+    - SIMD instructions
+    - ABI requirements
+    - compiler-generated code
+    - calls
+    - local variables
+
+
+Do NOT assume:
+
+    "stack can be aligned however I want"
+
+
+The exact required alignment depends on ABI and call-site state.
+
+
+===============================================================================
+38. WINDOWS x64 ABI
+===============================================================================
+
+INTEGER / POINTER ARGUMENTS:
+
+    1st -> RCX
+    2nd -> RDX
+    3rd -> R8
+    4th -> R9
+    5th+ -> stack
+
+
+32-bit views:
+
+    1st -> ECX
+    2nd -> EDX
+    3rd -> R8D
+    4th -> R9D
+
+
+FLOATING POINT:
+
+    XMM0
+    XMM1
+    XMM2
+    XMM3
+
+for the corresponding first four argument positions,
+subject to the detailed Microsoft x64 ABI rules.
+
+
+RETURN:
+
+    integer/pointer -> RAX
+    floating point  -> XMM0
+
+
+===============================================================================
+39. WINDOWS SHADOW SPACE
+===============================================================================
+
+Windows x64 requires the caller to provide:
+
+    32 bytes
+
+of home/shadow space for the callee's first four register argument slots.
+
+
+Conceptually:
+
+    +-----------------------+
+    | return address        |
+    +-----------------------+
+    | shadow/home space     |
+    | 8 bytes               |
+    +-----------------------+
+    | shadow/home space     |
+    | 8 bytes               |
+    +-----------------------+
+    | shadow/home space     |
+    | 8 bytes               |
+    +-----------------------+
+    | shadow/home space     |
+    | 8 bytes               |
+    +-----------------------+
+    | stack arguments       |
+    +-----------------------+
+
+
+===============================================================================
+40. LINUX SYSV AMD64 ABI
+===============================================================================
+
+INTEGER / POINTER:
+
+    1st -> RDI
+    2nd -> RSI
+    3rd -> RDX
+    4th -> RCX
+    5th -> R8
+    6th -> R9
+    7th+ -> stack
+
+
+32-bit:
+
+    1st -> EDI
+    2nd -> ESI
+    3rd -> EDX
+    4th -> ECX
+    5th -> R8D
+    6th -> R9D
+
+
+FLOATING POINT:
+
+    XMM0
+    XMM1
+    XMM2
+    XMM3
+    XMM4
+    XMM5
+    XMM6
+    XMM7
+
+
+RETURN:
+
+    integer/pointer -> RAX
+    floating point  -> XMM0
+
+
+===============================================================================
+41. macOS INTEL x86-64 ABI
+===============================================================================
+
+macOS Intel uses a System-V-derived calling convention.
+
+
+INTEGER / POINTER:
+
+    1st -> RDI
+    2nd -> RSI
+    3rd -> RDX
+    4th -> RCX
+    5th -> R8
+    6th -> R9
+    7th+ -> stack
+
+
+FLOATING POINT:
+
+    XMM0-XMM7
+
+
+RETURN:
+
+    integer/pointer -> RAX
+    floating point  -> XMM0
+
+
+IMPORTANT:
+
+    This section is for Intel x86-64 macOS.
+
+Apple Silicon:
+
+    ARM64 / AArch64
+
+uses completely different registers and ABI.
+
+
+===============================================================================
+42. MASTER ABI TABLE
+===============================================================================
+
++----------------------+---------------+----------------+----------------+
+| Argument             | Windows x64   | Linux SysV     | macOS x86-64  |
++----------------------+---------------+----------------+----------------+
+| 1st integer/pointer  | RCX           | RDI            | RDI            |
+| 2nd                 | RDX           | RSI            | RSI            |
+| 3rd                 | R8            | RDX            | RDX            |
+| 4th                 | R9            | RCX            | RCX            |
+| 5th                 | Stack         | R8             | R8             |
+| 6th                 | Stack         | R9             | R9             |
+| 7th+                | Stack         | Stack          | Stack          |
++----------------------+---------------+----------------+----------------+
+| 1st FP              | XMM0          | XMM0           | XMM0           |
+| 2nd FP              | XMM1          | XMM1           | XMM1           |
+| 3rd FP              | XMM2          | XMM2           | XMM2           |
+| 4th FP              | XMM3          | XMM3           | XMM3           |
+| 5th+                | stack/rules   | XMM4+          | XMM4+          |
++----------------------+---------------+----------------+----------------+
+| Integer return      | RAX           | RAX            | RAX            |
+| FP return           | XMM0          | XMM0           | XMM0           |
++----------------------+---------------+----------------+----------------+
+| Shadow space        | 32 bytes      | none           | none           |
++----------------------+---------------+----------------+----------------+
+
+
+===============================================================================
+43. ABI REGISTER WIDTH
+===============================================================================
+
+If ABI selects:
+
+    RCX
+
+then possible views are:
+
+    64-bit -> RCX
+    32-bit -> ECX
+    16-bit -> CX
+    8-bit  -> CL
+
+
+If ABI selects:
+
+    RDI
+
+then:
+
+    64-bit -> RDI
+    32-bit -> EDI
+    16-bit -> DI
+    8-bit  -> DIL
+
+
+IMPORTANT:
+
+    "a -> RCX"
+
+is shorthand.
+
+Precise:
+
+    "value of the first parameter a is passed
+     through the RCX register family under Windows x64."
+
+
+===============================================================================
+44. C -> WINDOWS NASM
+===============================================================================
+
+C:
+
+    int add(int a, int b)
+    {
+        return a + b;
+    }
+
+
+Windows ABI:
+
+    a -> RCX family
+    b -> RDX family
+
+Because int = 32-bit:
+
+    a -> ECX
+    b -> EDX
+
+Return:
+
+    EAX
+
+
+NASM:
+
+    global add
+
+    section .text
+
+    add:
+        mov eax, ecx
+        add eax, edx
+        ret
+
+
+===============================================================================
+45. C -> LINUX/macOS NASM
+===============================================================================
+
+C:
+
+    int add(int a, int b)
+    {
+        return a + b;
+    }
+
+
+Linux/macOS:
+
+    a -> RDI family
+    b -> RSI family
+
+Because int = 32-bit:
+
+    a -> EDI
+    b -> ESI
+
+
+NASM:
+
+    global add
+
+    section .text
+
+    add:
+        mov eax, edi
+        add eax, esi
+        ret
+
+
+===============================================================================
+46. RETURN VALUES
+===============================================================================
+
+Integer:
+
+    8-bit  -> AL
+    16-bit -> AX
+    32-bit -> EAX
+    64-bit -> RAX
+
+
+Pointer:
+
+    RAX
+
+
+Floating point:
+
+    XMM0
+
+
+Example:
+
+    char f()
+        -> AL
+
+    short f()
+        -> AX
+
+    int f()
+        -> EAX
+
+    long long f()
+        -> RAX
+
+    pointer f()
+        -> RAX
+
+    double f()
+        -> XMM0
+
+
+===============================================================================
+47. CALLER-SAVED vs CALLEE-SAVED
+===============================================================================
+
+CALLER-SAVED:
+
+    caller must preserve values if it needs them
+    across a function call.
+
+
+CALLEE-SAVED:
+
+    callee must restore original values before returning
+    if it modifies them.
+
+
+Another naming:
+
+    caller-saved = volatile
+    callee-saved = nonvolatile
+
+
+===============================================================================
+48. WINDOWS x64 GPR PRESERVATION
+===============================================================================
+
+VOLATILE:
+
+    RAX
+    RCX
+    RDX
+    R8
+    R9
+    R10
+    R11
+
+
+NONVOLATILE:
+
+    RBX
+    RBP
+    RSI
+    RDI
+    R12
+    R13
+    R14
+    R15
+    RSP
+
+
+===============================================================================
+49. LINUX SYSV AMD64 GPR PRESERVATION
+===============================================================================
+
+CALLER-SAVED:
+
+    RAX
+    RCX
+    RDX
+    RSI
+    RDI
+    R8
+    R9
+    R10
+    R11
+
+
+CALLEE-SAVED:
+
+    RBX
+    RBP
+    R12
+    R13
+    R14
+    R15
+    RSP
+
+
+===============================================================================
+50. macOS INTEL x86-64 GPR PRESERVATION
+===============================================================================
+
+System-V-derived convention:
+
+CALLER-SAVED:
+
+    RAX
+    RCX
+    RDX
+    RSI
+    RDI
+    R8
+    R9
+    R10
+    R11
+
+
+CALLEE-SAVED:
+
+    RBX
+    RBP
+    R12
+    R13
+    R14
+    R15
+    RSP
+
+
+===============================================================================
+51. XMM / SIMD REGISTERS
+===============================================================================
+
+XMM registers:
+
+    XMM0-XMM15
+    128-bit
+
+
+YMM registers:
+
+    YMM0-YMM15
+    256-bit
+
+
+ZMM registers:
+
+    ZMM0-ZMM31
+    512-bit on AVX-512 capable systems
+
+
+Hierarchy:
+
+    ZMM0
+    +-------------------------------+
+    |           512 bits            |
+    +-------------------------------+
+                  |
+                  v
+    YMM0
+    +-----------------------+
+    |       256 bits        |
+    +-----------------------+
+              |
+              v
+    XMM0
+    +---------------+
+    |   128 bits    |
+    +---------------+
+
+
+===============================================================================
+52. FLOAT / DOUBLE
+===============================================================================
+
+float:
+
+    32-bit IEEE-754
+
+
+double:
+
+    64-bit IEEE-754
+
+
+Typical ABI register:
+
+    float  -> XMM
+    double -> XMM
+
+
+Example:
+
+    double add(double a, double b)
+
+
+Linux/macOS:
+
+    a -> XMM0
+    b -> XMM1
+    return -> XMM0
+
+
+Windows:
+
+    corresponding FP argument positions use XMM0-XMM3
+    under Microsoft x64 ABI rules.
+
+
+===============================================================================
+53. SIMD INSTRUCTIONS
+===============================================================================
+
+SSE examples:
+
+    MOVSS
+    MOVSD
+    ADDSS
+    ADDSD
+    MULSS
+    MULSD
+
+
+Packed:
+
+    ADDPS
+    ADDPD
+    MULPS
+    MULPD
+
+
+AVX commonly uses:
+
+    V-prefixed instructions
+
+Examples:
+
+    VADDPS
+    VMOVAPS
+    VMULPD
+
+
+AVX-512:
+
+    ZMM registers
+    mask registers
+    wider vector operations
+
+
+===============================================================================
+54. MASK REGISTERS
+===============================================================================
+
+AVX-512 provides:
+
+    K0-K7
+
+mask registers.
+
+
+Used for:
+
+    predication
+    masked loads/stores
+    conditional vector operations
+
+
+===============================================================================
+55. X87
+===============================================================================
+
+Legacy floating-point unit:
+
+    ST0-ST7
+
+
+80-bit extended precision internally.
+
+
+Modern C/C++ x86-64 floating point normally relies heavily on:
+
+    SSE / SSE2 / AVX
+
+rather than old x87 for ordinary float/double operations.
+
+
+===============================================================================
+56. ATOMIC / LOCKED OPERATIONS
+===============================================================================
+
+Important instructions:
+
+    XCHG
+    CMPXCHG
+    XADD
+
+
+LOCK prefix:
+
+    lock add
+    lock xadd
+    lock cmpxchg
+
+
+Used for:
+
+    atomic operations
+    synchronization
+    concurrent programming
+
+
+But modern lock-free programming requires understanding:
+
+    memory ordering
+    cache coherence
+    compiler reordering
+    CPU memory model
+    ABI
+
+
+===============================================================================
+57. NOP
+===============================================================================
+
+    nop
+
+
+No operation.
+
+
+Used for:
+
+    alignment
+    padding
+    patching
+    instruction scheduling in some contexts
+
+
+===============================================================================
+58. CPU CONTROL / INFORMATION
+===============================================================================
+
+Important instructions:
+
+    CPUID
+    RDTSC
+    RDTSCP
+    PAUSE
+    LFENCE
+    SFENCE
+    MFENCE
+
+
+CPUID:
+
+    CPU feature/vendor information.
+
+
+RDTSC:
+
+    timestamp counter.
+
+
+PAUSE:
+
+    useful in spin-wait loops.
+
+
+===============================================================================
+59. PRIVILEGE LEVELS
+===============================================================================
+
+x86 has privilege rings conceptually:
+
+    Ring 0
+        kernel / highest privilege
+
+    Ring 3
+        user applications
+
+
+Normal application assembly runs in:
+
+    user mode
+
+
+OS kernel code runs with much higher privileges.
+
+
+User program cannot simply execute arbitrary privileged instructions.
+
+
+===============================================================================
+60. SYSTEM CALLS
+===============================================================================
+
+A user program needs OS services:
+
+    files
+    processes
+    memory
+    sockets
+    etc.
+
+
+It enters the kernel through an OS-defined system-call interface.
+
+
+IMPORTANT:
+
+    Windows system calls
+    !=
+    Linux system calls
+    !=
+    macOS system calls
+
+
+The ABI/API boundary is OS-specific.
+
+
+Linux x86-64 syscall convention uses registers such as:
+
+    RAX = syscall number
+    RDI = arg1
+    RSI = arg2
+    RDX = arg3
+    R10 = arg4
+    R8  = arg5
+    R9  = arg6
+
+
+Then:
+
+    syscall
+
+
+IMPORTANT:
+
+    Linux syscall ABI is NOT identical to the normal
+    SysV C function calling convention.
+
+Notice:
+
+    normal 4th argument -> RCX
+
+but syscall 4th argument -> R10
+
+
+===============================================================================
+61. WINDOWS OS API
+===============================================================================
+
+Windows applications normally call:
+
+    Win32 API
+    Windows libraries
+    NT interfaces
+
+rather than directly depending on undocumented kernel syscall numbers.
+
+
+Assembly can call Windows functions if it follows:
+
+    Microsoft x64 ABI
+    symbol/linker rules
+    required stack alignment
+    required shadow space
+    preservation rules
+
+
+===============================================================================
+62. macOS SYSTEM INTERFACE
+===============================================================================
+
+macOS user programs normally interact with:
+
+    libc
+    system frameworks
+    system APIs
+
+rather than writing raw kernel syscall code as the normal application model.
+
+
+x86-64 macOS ABI:
+
+    System-V-derived
+
+
+Apple Silicon:
+
+    ARM64
+
+different architecture.
+
+
+===============================================================================
+63. SYSTEM CALL != FUNCTION CALL
+===============================================================================
+
+Function call:
+
+    call function
+
+
+System call:
+
+    user -> kernel transition
+
+
+Function call stays within normal process execution context.
+
+System call crosses privilege boundary into OS kernel.
+
+
+===============================================================================
+64. PROCESS MEMORY LAYOUT
+===============================================================================
+
+Typical conceptual process:
+
+    HIGH ADDRESSES
+    +-------------------------+
+    | Stack                   |
+    |                         |
+    |          ↓              |
+    +-------------------------+
+    |                         |
+    | mmap / shared libraries |
+    |                         |
+    +-------------------------+
+    |          ↑              |
+    | Heap                    |
+    +-------------------------+
+    | .bss                    |
+    +-------------------------+
+    | .data                   |
+    +-------------------------+
+    | .rodata                 |
+    +-------------------------+
+    | .text                   |
+    +-------------------------+
+    LOW ADDRESSES
+
+
+Actual layout varies by OS, loader, ASLR, architecture and executable.
+
+
+===============================================================================
+65. SECTIONS
+===============================================================================
+
+.text:
+
+    executable machine code
+
+
+.rodata:
+
+    read-only data
+
+
+.data:
+
+    initialized writable global/static data
+
+
+.bss:
+
+    zero/uninitialized global/static storage
+
+
+.heap:
+
+    dynamically allocated memory
+
+
+.stack:
+
+    function call stack / local state
+
+
+===============================================================================
+66. ASLR
+===============================================================================
+
+ASLR:
+
+    Address Space Layout Randomization
+
+
+Changes locations of things such as:
+
+    executable components
+    shared libraries
+    stack
+    heap
+
+to make exploitation harder.
+
+
+===============================================================================
+67. NX / DEP
+===============================================================================
+
+Memory pages can have permissions such as:
+
+    Read
+    Write
+    Execute
+
+
+Modern systems commonly prevent:
+
+    writable + executable
+
+memory where possible.
+
+
+Windows:
+
+    DEP
+
+
+Linux:
+
+    NX / executable page protections
+
+
+macOS:
+
+    executable memory protections
+
+
+===============================================================================
+68. ENDianness
+===============================================================================
+
+x86 is:
+
+    little-endian
+
+
+Example:
+
+    value:
+
+        0x1122334455667788
+
+
+Stored in memory:
+
+    lower address:
+
+        88
+        77
+        66
+        55
+        44
+        33
+        22
+        11
+
+
+===============================================================================
+69. STRUCT LAYOUT
+===============================================================================
+
+C:
+
+    struct Point
+    {
+        int x;
+        int y;
+    };
+
+
+Typical:
+
+    x = offset 0
+    y = offset 4
+
+
+sizeof(Point):
+
+    8
+
+
+But structs can have:
+
+    padding
+    alignment
+    ABI-specific passing rules
+
+
+Never assume:
+
+    sizeof(struct) = sum of members
+
+without checking alignment/padding.
+
+
+===============================================================================
+70. STRUCT PADDING
+===============================================================================
+
+Example:
+
+    struct Example
+    {
+        char a;
+        int b;
+    };
+
+
+Possible layout:
+
+    offset 0:
+        a       1 byte
+
+    offset 1-3:
+        padding
+
+    offset 4:
+        b       4 bytes
+
+
+Total:
+
+    8 bytes
+
+
+===============================================================================
+71. ARRAYS
+===============================================================================
+
+For:
+
+    int array[10];
+
+
+Each element:
+
+    4 bytes
+
+
+Address:
+
+    array[i]
+
+approximately:
+
+    base + i*4
+
+
+For:
+
+    double array[10]
+
+element size:
+
+    8
+
+Address:
+
+    base + i*8
+
+
+===============================================================================
+72. POINTER ARITHMETIC
+===============================================================================
+
+C:
+
+    p + 1
+
+
+does NOT necessarily mean:
+
+    address + 1 byte
+
+
+It means:
+
+    address + sizeof(*p)
+
+
+Example:
+
+    int *p
+
+then:
+
+    p + 1
+
+means:
+
+    address + 4
+
+
+Assembly must explicitly calculate the correct byte offset.
+
+
+===============================================================================
+73. GLOBAL SYMBOLS
+===============================================================================
+
+NASM:
+
+    global add
+
+
+Makes symbol visible to linker in appropriate object formats.
+
+
+External function:
+
+    extern printf
+
+
+Then:
+
+    call printf
+
+
+Exact symbol naming/linking can vary by OS/toolchain.
+
+
+===============================================================================
+74. LOCAL LABELS
+===============================================================================
+
+Example:
+
+    loop_start:
+
+        ...
+
+        jmp loop_start
+
+
+NASM also supports local-label conventions.
+
+Labels are assembler symbols, not C variables.
+
+
+===============================================================================
+75. COMMENTS
+===============================================================================
+
+NASM:
+
+    ; comment
+
+
+Example:
+
+    mov eax, 10     ; load 10 into EAX
+
+
+===============================================================================
+76. NASM DIRECTIVES vs INSTRUCTIONS
+===============================================================================
+
+INSTRUCTION:
+
+    CPU executes it.
+
+Examples:
+
+    mov
+    add
+    sub
+    call
+    ret
+
+
+DIRECTIVE:
+
+    assembler processes it.
+
+Examples:
+
+    global
+    extern
+    section
+    db
+    dq
+    resb
+
+
+Important distinction:
+
+    CPU never executes "global".
+
+The assembler uses it when generating object code.
+
+
+===============================================================================
+77. REGISTER vs MEMORY
+===============================================================================
+
+Register:
+
+    mov eax, ebx
+
+
+Memory:
+
+    mov eax, [rbx]
+
+
+Difference:
+
+    mov eax, ebx
+
+means:
+
+    EAX = EBX
+
+
+    mov eax, [rbx]
+
+means:
+
+    EAX = memory at address RBX
+
+
+The brackets matter.
+
+
+===============================================================================
+78. ADDRESS vs VALUE
+===============================================================================
+
+Suppose:
+
+    RAX = 0x1000
+
+
+and:
+
+    [0x1000] = 123
+
+
+Then:
+
+    mov rbx, rax
+
+gives:
+
+    RBX = 0x1000
+
+
+But:
+
+    mov rbx, [rax]
+
+gives:
+
+    RBX = 123
+
+
+Very important:
+
+    RAX       = address
+    [RAX]     = data at that address
+
+
+===============================================================================
+79. STACK ARGUMENTS
+===============================================================================
+
+If registers are insufficient:
+
+    arguments go to memory/stack according to ABI.
+
+
+Windows:
+
+    first four integer argument slots use:
+
+        RCX RDX R8 R9
+
+    additional arguments use stack.
+
+
+SysV:
+
+    first six integer/pointer arguments:
+
+        RDI RSI RDX RCX R8 R9
+
+    additional arguments use stack.
+
+
+Complex aggregates can alter this simple picture.
+
+
+===============================================================================
+80. MIXED INTEGER + FP ARGUMENTS
+===============================================================================
+
+Do NOT use a simplistic:
+
+    "count integers separately"
+    "count floats separately"
+
+model for every ABI case.
+
+
+Real ABIs classify arguments by:
+
+    type
+    size
+    position
+    aggregate classification
+    register availability
+
+
+Especially important for:
+
+    struct
+    union
+    vector
+    mixed integer/FP
+    variadic functions
+
+
+The Microsoft x64 ABI also has important positional rules for FP arguments.
+
+
+===============================================================================
+81. VARIADIC FUNCTIONS
+===============================================================================
+
+Example:
+
+    printf("%d %f", x, y);
+
+
+Variadic calls have additional ABI requirements.
+
+
+Windows x64:
+
+    floating-point values passed to variadic/unprototyped functions
+    have special register/home-space behavior.
+
+
+SysV AMD64:
+
+    uses additional state such as:
+
+        AL
+
+to communicate the number of vector registers used for
+certain variadic calls.
+
+
+Therefore:
+
+    printf
+
+is an important ABI case study.
+
+
+===============================================================================
+82. C CALLING CONVENTION
+===============================================================================
+
+C compiler generates caller and callee according to ABI.
+
+
+Caller responsibilities can include:
+
+    argument setup
+    stack setup
+    preserving caller-saved values
+    call
+
+
+Callee responsibilities can include:
+
+    preserving callee-saved registers
+    local stack allocation
+    returning correct result
+    restoring stack state
+
+
+===============================================================================
+83. FUNCTION PROLOGUE
+===============================================================================
+
+Possible:
+
+    push rbp
+    mov rbp, rsp
+    sub rsp, 32
+
+
+Meaning:
+
+    save old frame pointer
+    establish frame
+    reserve locals
+
+
+But exact prologue depends on:
+
+    compiler
+    optimization
+    ABI
+    local variables
+    register usage
+    stack alignment
+
+
+===============================================================================
+84. FUNCTION EPILOGUE
+===============================================================================
+
+Possible:
+
+    add rsp, 32
+    pop rbp
+    ret
+
+
+Or:
+
+    mov rsp, rbp
+    pop rbp
+    ret
+
+
+Optimized functions may have no RBP frame.
+
+
+===============================================================================
+85. REGISTER SAVE EXAMPLE
+===============================================================================
+
+Suppose a function wants to modify RBX on SysV.
+
+
+RBX is callee-saved.
+
+Therefore:
+
+    push rbx
+
+    ...
+    ; modify RBX
+
+    pop rbx
+    ret
+
+
+Equivalent conceptual requirement:
+
+    original RBX
+        |
+        +-- must be restored before RET
+
+
+===============================================================================
+86. WINDOWS SHADOW SPACE vs SYSV
+===============================================================================
+
+Windows:
+
+    mandatory 32-byte shadow/home space.
+
+
+SysV:
+
+    no Windows-style mandatory 32-byte shadow space.
+
+
+Do not mix calling conventions.
+
+
+Windows assembly function called by SysV caller:
+
+    WRONG unless adapted.
+
+
+SysV assembly function called by Windows caller:
+
+    WRONG unless adapted.
+
+
+===============================================================================
+87. OBJECT FILES
+===============================================================================
+
+Windows:
+
+    PE/COFF
+    .obj
+
+
+Linux:
+
+    ELF
+    .o
+
+
+macOS:
+
+    Mach-O
+    .o
+
+
+The assembler produces relocatable object code.
+
+The linker resolves:
+
+    symbols
+    relocations
+    libraries
+    sections
+
+
+===============================================================================
+88. STATIC LIBRARIES
+===============================================================================
+
+Windows:
+
+    .lib
+
+
+Linux:
+
+    .a
+
+
+macOS:
+
+    .a
+
+
+Static library is basically an archive of object files
+plus symbol/index information.
+
+
+===============================================================================
+89. DYNAMIC LIBRARIES
+===============================================================================
+
+Windows:
+
+    .dll
+
+
+Linux:
+
+    .so
+
+
+macOS:
+
+    .dylib
+    frameworks are also important
+
+
+Dynamic libraries are loaded/linked differently from static archives.
+
+
+===============================================================================
+90. EXECUTABLE FORMATS
+===============================================================================
+
+Windows:
+
+    PE
+
+usually:
+
+    .exe
+
+
+Linux:
+
+    ELF
+
+
+macOS:
+
+    Mach-O
+
+
+===============================================================================
+91. TOOLCHAIN
+===============================================================================
+
+Windows possible:
+
+    NASM
+    MSVC
+    clang-cl
+    lld-link
+    link.exe
+    CMake
+
+
+Linux possible:
+
+    NASM
+    GCC
+    Clang
+    ld
+    lld
+    CMake
+
+
+macOS:
+
+    NASM
+    Clang
+    ld
+    lld (where applicable)
+    CMake
+
+
+===============================================================================
+92. NASM BUILD EXAMPLE
+===============================================================================
+
+Source:
+
+    add.asm
+
+
+Windows concept:
+
+    NASM
+       |
+       v
+    add.obj
+       |
+       v
+    linker
+       |
+       v
+    executable
+
+
+Linux:
+
+    NASM
+       |
+       v
+    add.o
+       |
+       v
+    linker
+       |
+       v
+    executable
+
+
+macOS:
+
+    NASM
+       |
+       v
+    add.o
+       |
+       v
+    linker
+       |
+       v
+    executable
+
+
+===============================================================================
+93. C + NASM INTEROP
+===============================================================================
+
+C:
+
+    extern int add(int a, int b);
+
+
+C compiler expects symbol:
+
+    add
+
+
+NASM:
+
+    global add
+
+    add:
+        ...
+
+
+Both sides must agree on:
+
+    symbol
+    ABI
+    argument registers
+    return register
+    stack alignment
+    register preservation
+
+
+===============================================================================
+94. WINDOWS C + NASM
+===============================================================================
+
+C:
+
+    extern int add(int a, int b);
+
+
+NASM:
+
+    global add
+
+    section .text
+
+    add:
+        mov eax, ecx
+        add eax, edx
+        ret
+
+
+Agreement:
+
+    a -> ECX
+    b -> EDX
+    result -> EAX
+
+
+===============================================================================
+95. LINUX/macOS C + NASM
+===============================================================================
+
+C:
+
+    extern int add(int a, int b);
+
+
+NASM:
+
+    global add
+
+    section .text
+
+    add:
+        mov eax, edi
+        add eax, esi
+        ret
+
+
+Agreement:
+
+    a -> EDI
+    b -> ESI
+    result -> EAX
+
+
+===============================================================================
+96. C POINTER + NASM
+===============================================================================
+
+C:
+
+    int get_value(int *p)
+    {
+        return *p;
+    }
+
+
+Windows:
+
+    p -> RCX
+
+
+NASM:
+
+    mov eax, [rcx]
+    ret
+
+
+Linux/macOS:
+
+    p -> RDI
+
+
+NASM:
+
+    mov eax, [rdi]
+    ret
+
+
+Key:
+
+    RCX/RDI = address
+    [RCX]/[RDI] = value at address
+
+
+===============================================================================
+97. C STRUCT + NASM
+===============================================================================
+
+Example:
+
+    struct Point
+    {
+        int x;
+        int y;
+    };
+
+
+Memory:
+
+    +--------+
+    | x      | 4
+    +--------+
+    | y      | 4
+    +--------+
+
+Possible total:
+
+    8 bytes
+
+
+BUT:
+
+    struct passing/return ABI rules are more complex.
+
+Never assume:
+
+    "struct always goes in one register."
+
+
+Large structs may be:
+
+    split
+    passed in registers
+    passed in memory
+    passed indirectly
+
+depending on ABI classification.
+
+
+===============================================================================
+98. C ARRAY + NASM
+===============================================================================
+
+C:
+
+    int sum(int *array, int count);
+
+
+Windows:
+
+    array -> RCX
+    count -> RDX
+
+
+Linux/macOS:
+
+    array -> RDI
+    count -> RSI
+
+
+Loop concept:
+
+    index * sizeof(int)
+
+therefore:
+
+    index * 4
+
+
+===============================================================================
+99. COMMON C TYPE -> SIZE TABLE
+===============================================================================
+
++----------------------+--------+-------+
+| Type                 | Bytes  | Bits  |
++----------------------+--------+-------+
+| char                 | 1      | 8     |
+| short                | 2      | 16    |
+| int                  | 4      | 32    |
+| long long            | 8      | 64    |
+| pointer              | 8      | 64    |
+| float                | 4      | 32    |
+| double               | 8      | 64    |
++----------------------+--------+-------+
+
+
+===============================================================================
+100. REGISTER VIEW CHEAT SHEET
+===============================================================================
+
+RAX -> EAX -> AX -> AL
+RBX -> EBX -> BX -> BL
+RCX -> ECX -> CX -> CL
+RDX -> EDX -> DX -> DL
+
+RSI -> ESI -> SI -> SIL
+RDI -> EDI -> DI -> DIL
+
+R8  -> R8D  -> R8W  -> R8B
+R9  -> R9D  -> R9W  -> R9B
+R10 -> R10D -> R10W -> R10B
+R11 -> R11D -> R11W -> R11B
+R12 -> R12D -> R12W -> R12B
+R13 -> R13D -> R13W -> R13B
+R14 -> R14D -> R14W -> R14B
+R15 -> R15D -> R15W -> R15B
+
+
+===============================================================================
+101. WINDOWS ABI CHEAT SHEET
+===============================================================================
+
+INTEGER / POINTER:
+
+    1 = RCX
+    2 = RDX
+    3 = R8
+    4 = R9
+    5+ = STACK
+
+
+FP:
+
+    first four argument positions -> XMM0-XMM3
+    detailed rules apply for mixed/variadic cases
+
+
+RETURN:
+
+    integer/pointer = RAX
+    FP             = XMM0
+
+
+SHADOW:
+
+    32 bytes
+
+
+===============================================================================
+102. LINUX ABI CHEAT SHEET
+===============================================================================
+
+INTEGER / POINTER:
+
+    1 = RDI
+    2 = RSI
+    3 = RDX
+    4 = RCX
+    5 = R8
+    6 = R9
+    7+ = STACK
+
+
+FP:
+
+    XMM0-XMM7
+
+
+RETURN:
+
+    integer/pointer = RAX
+    FP             = XMM0
+
+
+===============================================================================
+103. macOS INTEL ABI CHEAT SHEET
+===============================================================================
+
+INTEGER / POINTER:
+
+    1 = RDI
+    2 = RSI
+    3 = RDX
+    4 = RCX
+    5 = R8
+    6 = R9
+    7+ = STACK
+
+
+FP:
+
+    XMM0-XMM7
+
+
+RETURN:
+
+    integer/pointer = RAX
+    FP             = XMM0
+
+
+===============================================================================
+104. OS FILE FORMAT CHEAT SHEET
+===============================================================================
+
++-------------+------------+------------+-------------+
+|             | Windows    | Linux      | macOS Intel |
++-------------+------------+------------+-------------+
+| Object      | .obj       | .o         | .o          |
+| Format      | PE/COFF    | ELF        | Mach-O      |
+| Static lib  | .lib       | .a         | .a          |
+| Dynamic lib | .dll       | .so        | .dylib      |
+| Executable  | .exe/PE   | ELF        | Mach-O      |
+| ABI         | MS x64     | SysV AMD64 | SysV-derived|
++-------------+------------+------------+-------------+
+
+
+===============================================================================
+105. COMMON NASM SYNTAX
+===============================================================================
+
+    instruction destination, source
+
+
+Example:
+
+    mov eax, ebx
+
+
+Memory:
+
+    mov eax, [rbx]
+
+
+Immediate:
+
+    mov eax, 123
+
+
+Register:
+
+    mov eax, ebx
+
+
+Address:
+
+    lea rax, [rbx + 8]
+
+
+===============================================================================
+106. IMMEDIATE vs REGISTER vs MEMORY
+===============================================================================
+
+Immediate:
+
+    mov eax, 10
+
+    source = constant 10
+
+
+Register:
+
+    mov eax, ebx
+
+    source = EBX
+
+
+Memory:
+
+    mov eax, [rbx]
+
+    source = memory addressed by RBX
+
+
+===============================================================================
+107. COMMON NASM ERRORS
+===============================================================================
+
+ERROR:
+
+    mov eax, rbx
+
+because:
+
+    EAX = 32-bit
+    RBX = 64-bit
+
+Widths don't match.
+
+
+Correct:
+
+    mov rax, rbx
+
+
+or:
+
+    mov eax, ebx
+
+
+depending on intended operation.
+
+
+===============================================================================
+108. MEMORY-TO-MEMORY MOV
+===============================================================================
+
+Generally x86 MOV does NOT allow:
+
+    mov [a], [b]
+
+
+Use a register:
+
+    mov rax, [b]
+    mov [a], rax
+
+
+There are special string instructions for memory-to-memory
+operations, but normal MOV is register/immediate/memory with
+the normal x86 operand restrictions.
+
+
+===============================================================================
+109. IMMEDIATE SIZE
+===============================================================================
+
+Example:
+
+    mov rax, 10
+
+
+Assembler encodes an appropriate immediate form.
+
+
+Important:
+
+x86-64 does not have a simple universal:
+
+    "every instruction supports every immediate size"
+
+rule.
+
+
+Instruction encoding determines what is legal.
+
+
+===============================================================================
+110. RIP-RELATIVE ADDRESSING
+===============================================================================
+
+Very important for modern x86-64 code.
+
+Example:
+
+    mov rax, [rel variable]
+
+
+Conceptually:
+
+    address = RIP + displacement
+
+
+Useful for:
+
+    position-independent code
+    shared libraries
+    modern executable layouts
+
+
+===============================================================================
+111. PIC
+===============================================================================
+
+PIC:
+
+    Position Independent Code
+
+
+Code does not require fixed absolute addresses in the same way
+as older code.
+
+
+RIP-relative addressing is important on x86-64.
+
+
+===============================================================================
+112. RELOCATION
+===============================================================================
+
+Assembler may not know final address of:
+
+    external function
+    global variable
+    library symbol
+
+
+So object file contains relocation information.
+
+
+Linker later resolves it.
+
+
+Flow:
+
+    NASM
+      |
+      v
+    object
+      |
+      | relocation
+      v
+    linker
+      |
+      v
+    final binary
+
+
+===============================================================================
+113. LINKER
+===============================================================================
+
+Linker responsibilities include:
+
+    - symbol resolution
+    - relocation
+    - section placement
+    - library linking
+    - executable generation
+
+
+Example:
+
+    call add
+
+
+If add is in another object:
+
+    linker resolves add's address/relocation.
+
+
+===============================================================================
+114. STATIC LINKING
+===============================================================================
+
+Program:
+
+    main.o
+       +
+    math.o
+       |
+       v
+    linker
+       |
+       v
+    executable
+
+
+Static library:
+
+    libmath.a
+
+or Windows:
+
+    math.lib
+
+
+===============================================================================
+115. DYNAMIC LINKING
+===============================================================================
+
+Executable:
+
+    app.exe / ELF / Mach-O
+
+depends on:
+
+    DLL / SO / DYLIB
+
+
+OS loader/linker machinery loads required shared libraries.
+
+
+===============================================================================
+116. LOADER
+===============================================================================
+
+OS loader:
+
+    loads executable
+    maps segments/pages
+    performs required relocations
+    loads dependencies
+    prepares process
+    transfers control to program entry
+
+
+Conceptually:
+
+    executable
+        |
+        v
+    OS loader
+        |
+        v
+    process
+        |
+        v
+    entry point
+
+
+===============================================================================
+117. ENTRY POINT
+===============================================================================
+
+Executable has an entry point.
+
+
+It is NOT necessarily:
+
+    main
+
+
+Usually:
+
+    OS loader
+       |
+       v
+    runtime/startup
+       |
+       v
+    main
+
+
+C/C++ runtime performs initialization before calling main.
+
+
+===============================================================================
+118. main() IS NOT ALWAYS THE FIRST INSTRUCTION
+===============================================================================
+
+Typical:
+
+    OS
+     |
+     v
+    loader
+     |
+     v
+    runtime startup
+     |
+     +--> initialize runtime
+     |
+     +--> initialize globals
+     |
+     v
+    main()
+     |
+     v
+    exit
+
+
+===============================================================================
+119. C RUNTIME
+===============================================================================
+
+C/C++ executable often includes runtime components.
+
+
+They handle things such as:
+
+    initialization
+    command-line setup
+    TLS
+    constructors
+    destructors
+    exit handling
+
+
+Exact behavior depends on:
+
+    compiler
+    CRT
+    OS
+    linker
+    language/runtime
+
+
+===============================================================================
+120. C++ IS MORE COMPLEX
+===============================================================================
+
+C++ adds:
+
+    constructors
+    destructors
+    exceptions
+    RTTI
+    templates
+    virtual functions
+    vtables
+    name mangling
+    static initialization
+    thread-local objects
+
+
+Therefore C++ <-> assembly interoperability requires understanding
+more than just register arguments.
+
+
+===============================================================================
+121. NAME MANGLING
+===============================================================================
+
+C++:
+
+    int add(int, int)
+
+
+may not appear in object symbol table simply as:
+
+    add
+
+
+C++ compiler may encode:
+
+    parameter types
+    namespace
+    class
+    overload information
+
+
+C:
+
+    extern "C"
+
+can request C linkage for compatible functions.
+
+
+Example:
+
+    extern "C" int add(int a, int b);
+
+
+This is extremely useful for C/C++ <-> Assembly interoperability.
+
+
+===============================================================================
+122. C vs C++ ABI
+===============================================================================
+
+C has relatively simpler function interfaces.
+
+
+C++ ABI includes:
+
+    name mangling
+    classes
+    this pointer
+    vtables
+    exceptions
+    RTTI
+    constructors
+    destructors
+
+
+Therefore:
+
+    Assembly + extern "C"
+
+is often the simplest interop boundary.
+
+
+===============================================================================
+123. THIS POINTER
+===============================================================================
+
+C++:
+
+    obj.method(x)
+
+
+Conceptually includes an object pointer:
+
+    this
+
+
+Depending on ABI, this pointer is passed using an ABI-defined
+register/stack location.
+
+
+Do not assume:
+
+    "this is always RCX"
+
+across all platforms.
+
+
+Windows x64 C++ member-function calls commonly use RCX for this,
+but Linux/macOS SysV use the SysV argument convention.
+
+
+===============================================================================
+124. VTABLE
+===============================================================================
+
+Typical C++ virtual class:
+
+    object
+      |
+      v
+    vptr
+      |
+      v
+    vtable
+      |
+      +--> virtual function address
+      +--> virtual function address
+      +--> ...
+
+
+Exact object/vtable layout is ABI/compiler-specific.
+
+
+===============================================================================
+125. EXCEPTIONS
+===============================================================================
+
+C++ exceptions involve:
+
+    stack unwinding
+    metadata
+    runtime support
+    personality/unwind mechanisms
+
+
+Windows:
+
+    Windows-specific unwinding/runtime mechanisms
+
+
+Linux/macOS:
+
+    typically DWARF-based exception/unwind metadata mechanisms
+
+
+Assembly functions participating in C++ exception unwinding may need
+proper unwind metadata.
+
+
+===============================================================================
+126. DEBUG INFORMATION
+===============================================================================
+
+Assemblers/compilers can emit debug information.
+
+
+Examples:
+
+    symbols
+    source mappings
+    register locations
+    variable locations
+    unwind information
+
+
+Tools:
+
+    debugger
+    disassembler
+    symbol tools
+
+
+===============================================================================
+127. DEBUGGER CONCEPT
+===============================================================================
+
+Debugger lets you inspect:
+
+    registers
+    stack
+    memory
+    instruction pointer
+    breakpoints
+    call stack
+
+
+Typical workflow:
+
+    breakpoint
+        |
+        v
+    inspect RIP
+        |
+        v
+    inspect RSP
+        |
+        v
+    inspect registers
+        |
+        v
+    inspect memory
+
+
+===============================================================================
+128. DISASSEMBLY
+===============================================================================
+
+Disassembler:
+
+    machine code
+        |
+        v
+    assembly representation
+
+
+Compiler direction:
+
+    C/C++
+       |
+       v
+    machine code
+
+
+Disassembler direction:
+
+    machine code
+       |
+       v
+    assembly-like representation
+
+
+Disassembly is not necessarily the original source assembly.
+
+
+===============================================================================
+129. HEX / MACHINE CODE
+===============================================================================
+
+Assembly:
+
+    mov eax, 1
+
+
+Assembler converts it into machine-code bytes.
+
+
+CPU executes:
+
+    bytes
+
+
+NOT:
+
+    text "mov eax, 1"
+
+
+Assembly is human-readable representation of machine instructions.
+
+
+===============================================================================
+130. INSTRUCTION ENCODING
+===============================================================================
+
+x86 instructions can contain:
+
+    prefixes
+    opcode
+    ModRM
+    SIB
+    displacement
+    immediate
+
+
+Conceptual:
+
+    +----------+--------+-------+--------------+
+    | prefixes | opcode | ModRM | imm/disp...  |
+    +----------+--------+-------+--------------+
+
+
+Not every instruction contains every field.
+
+
+===============================================================================
+131. MODRM
+===============================================================================
+
+Many x86 instructions use:
+
+    ModRM
+
+
+It encodes information such as:
+
+    register operand
+    memory/register addressing mode
+
+
+SIB can encode:
+
+    Scale
+    Index
+    Base
+
+
+===============================================================================
+132. SIB
+===============================================================================
+
+SIB:
+
+    Scale
+    Index
+    Base
+
+
+Example conceptual:
+
+    [rax + rcx*4]
+
+
+can be encoded using a SIB structure.
+
+
+===============================================================================
+133. INSTRUCTION LENGTH
+===============================================================================
+
+x86 instructions are variable-length.
+
+
+Typical range:
+
+    1 to 15 bytes
+
+
+This is one reason x86 decoding is more complex than many
+fixed-width instruction-set architectures.
+
+
+===============================================================================
+134. FLAGS + ARITHMETIC
+===============================================================================
+
+Example:
+
+    mov eax, 0xFFFFFFFF
+    add eax, 1
+
+
+32-bit result:
+
+    EAX = 0
+
+
+ZF:
+
+    1
+
+
+CF:
+
+    1
+
+
+This demonstrates why flags matter.
+
+
+===============================================================================
+135. CARRY vs OVERFLOW
+===============================================================================
+
+Carry:
+
+    mainly relevant to unsigned arithmetic.
+
+
+Overflow:
+
+    signed integer overflow.
+
+
+Example 8-bit signed:
+
+    127 + 1
+
+
+bits:
+
+    01111111
+    +
+    00000001
+    ----------
+    10000000
+
+
+Interpreted signed:
+
+    -128
+
+
+Therefore:
+
+    OF = 1
+
+
+===============================================================================
+136. ZEROING REGISTERS
+===============================================================================
+
+Common:
+
+    xor eax, eax
+
+
+or:
+
+    mov eax, 0
+
+
+Both produce zero, but compilers often prefer:
+
+    xor eax, eax
+
+for architectural/encoding reasons.
+
+
+===============================================================================
+137. XOR ZEROING AND FLAGS
+===============================================================================
+
+    xor eax, eax
+
+
+sets:
+
+    EAX = 0
+
+
+and also modifies flags.
+
+
+Therefore if flags matter, don't blindly replace instructions
+without understanding the flag effects.
+
+
+===============================================================================
+138. NOP / ALIGNMENT
+===============================================================================
+
+Assembler can align code/data.
+
+
+Conceptual:
+
+    align 16
+
+
+may insert padding.
+
+
+Alignment can improve:
+
+    instruction fetch
+    data access
+    SIMD access
+    ABI compliance
+
+
+depending on context.
+
+
+===============================================================================
+139. CACHE
+===============================================================================
+
+CPU memory hierarchy roughly:
+
+    Registers
+       |
+    L1 cache
+       |
+    L2 cache
+       |
+    L3 cache
+       |
+    RAM
+       |
+    Storage
+
+
+Assembly performance often depends heavily on:
+
+    cache locality
+    memory latency
+    branch prediction
+    instruction throughput
+    dependency chains
+
+
+===============================================================================
+140. CPU PIPELINE
+===============================================================================
+
+Modern CPU roughly performs:
+
+    fetch
+      |
+    decode
+      |
+    rename
+      |
+    schedule
+      |
+    execute
+      |
+    retire
+
+
+Actual implementation is CPU-specific.
+
+
+Modern x86 CPUs are:
+
+    out-of-order
+    superscalar
+    speculative
+
+
+Therefore:
+
+    assembly source order
+        !=
+    physical execution timing
+
+
+===============================================================================
+141. REGISTER RENAMING
+===============================================================================
+
+Modern CPUs internally use physical registers.
+
+
+Architectural:
+
+    RAX
+    RBX
+    RCX
+
+
+does not necessarily correspond one-to-one to a single physical
+storage location throughout execution.
+
+
+CPU can rename registers internally to reduce false dependencies.
+
+
+===============================================================================
+142. DEPENDENCIES
+===============================================================================
+
+Example:
+
+    add rax, rbx
+    add rax, rcx
+
+
+Second instruction depends on first result.
+
+
+Dependency chain can limit throughput.
+
+
+Independent:
+
+    add rax, rbx
+    add rdx, rcx
+
+
+can potentially execute more independently.
+
+
+Actual performance depends on CPU microarchitecture.
+
+
+===============================================================================
+143. BRANCH PREDICTION
+===============================================================================
+
+Conditional:
+
+    cmp
+    jne
+
+
+CPU predicts branch direction.
+
+
+Wrong prediction:
+
+    pipeline work may be discarded.
+
+
+Performance-sensitive code often cares about:
+
+    predictable branches
+    branchless operations
+    data locality
+
+
+But "branchless is always faster" is FALSE.
+
+
+===============================================================================
+144. ATOMICITY
+===============================================================================
+
+Single instruction does not automatically mean:
+
+    universally atomic
+
+
+Atomicity depends on:
+
+    instruction
+    alignment
+    memory type
+    architecture
+    operand size
+    concurrency model
+
+
+Use proper atomic primitives and language/OS facilities.
+
+
+===============================================================================
+145. MEMORY ORDERING
+===============================================================================
+
+Concurrent systems require understanding:
+
+    compiler ordering
+    CPU ordering
+    cache coherence
+    fences
+    acquire/release
+    sequential consistency
+
+
+Instructions:
+
+    LFENCE
+    SFENCE
+    MFENCE
+
+
+and atomic instructions can participate.
+
+
+===============================================================================
+146. RED ZONE
+===============================================================================
+
+IMPORTANT Linux/macOS SysV concept:
+
+    128-byte red zone
+
+exists below RSP for normal SysV AMD64 user-space code.
+
+
+Signal/interrupt handling rules matter.
+
+
+Windows x64 does NOT use the SysV red zone.
+
+
+Therefore:
+
+    SysV assembly may use red-zone assumptions
+    Windows assembly must not assume a SysV red zone.
+
+
+===============================================================================
+147. WINDOWS vs SYSV CRITICAL DIFFERENCES
+===============================================================================
+
+Windows:
+
+    RCX RDX R8 R9
+    32-byte shadow space
+    no SysV red zone
+
+
+Linux/macOS:
+
+    RDI RSI RDX RCX R8 R9
+    no Windows-style shadow space
+    SysV red zone in applicable user-space code
+
+
+This difference alone can break assembly interop if ignored.
+
+
+===============================================================================
+148. FULL REGISTER MAP
+===============================================================================
+
++------+--------+--------+--------+--------+
+|      | 64-bit | 32-bit | 16-bit | 8-bit  |
++------+--------+--------+--------+--------+
+| A    | RAX    | EAX    | AX     | AL     |
+| B    | RBX    | EBX    | BX     | BL     |
+| C    | RCX    | ECX    | CX     | CL     |
+| D    | RDX    | EDX    | DX     | DL     |
+| SI   | RSI    | ESI    | SI     | SIL    |
+| DI   | RDI    | EDI    | DI     | DIL    |
+| 8    | R8     | R8D    | R8W    | R8B    |
+| 9    | R9     | R9D    | R9W    | R9B    |
+| 10   | R10    | R10D   | R10W   | R10B   |
+| 11   | R11    | R11D   | R11W   | R11B   |
+| 12   | R12    | R12D   | R12W   | R12B   |
+| 13   | R13    | R13D   | R13W   | R13B   |
+| 14   | R14    | R14D   | R14W   | R14B   |
+| 15   | R15    | R15D   | R15W   | R15B   |
++------+--------+--------+--------+--------+
+
+
+===============================================================================
+149. WINDOWS PARAMETER WIDTH MAP
+===============================================================================
+
+1st:
+
+    64 -> RCX
+    32 -> ECX
+    16 -> CX
+     8 -> CL
+
+
+2nd:
+
+    64 -> RDX
+    32 -> EDX
+    16 -> DX
+     8 -> DL
+
+
+3rd:
+
+    64 -> R8
+    32 -> R8D
+    16 -> R8W
+     8 -> R8B
+
+
+4th:
+
+    64 -> R9
+    32 -> R9D
+    16 -> R9W
+     8 -> R9B
+
+
+===============================================================================
+150. LINUX/macOS PARAMETER WIDTH MAP
+===============================================================================
+
+1st:
+
+    64 -> RDI
+    32 -> EDI
+    16 -> DI
+     8 -> DIL
+
+
+2nd:
+
+    64 -> RSI
+    32 -> ESI
+    16 -> SI
+     8 -> SIL
+
+
+3rd:
+
+    64 -> RDX
+    32 -> EDX
+    16 -> DX
+     8 -> DL
+
+
+4th:
+
+    64 -> RCX
+    32 -> ECX
+    16 -> CX
+     8 -> CL
+
+
+5th:
+
+    64 -> R8
+    32 -> R8D
+    16 -> R8W
+     8 -> R8B
+
+
+6th:
+
+    64 -> R9
+    32 -> R9D
+    16 -> R9W
+     8 -> R9B
+
+
+===============================================================================
+151. CRITICAL ABI RULE
+===============================================================================
+
+Do NOT think:
+
+    char -> "special char register"
+    int  -> "special int register"
+
+
+Instead:
+
+    ABI first selects argument location/classification.
+
+Then:
+
+    operand width / type representation determines
+    how much of that location is relevant.
+
+
+Example Windows:
+
+    1st integer argument -> RCX family
+
+
+If int:
+
+    use ECX view
+
+
+If 64-bit integer:
+
+    use RCX view
+
+
+If 8-bit:
+
+    use CL view
+
+
+===============================================================================
+152. REGISTER NAMES ARE NOT C VARIABLES
+===============================================================================
+
+C:
+
+    int a;
+
+
+Assembly:
+
+    ECX
+
+
+does NOT mean:
+
+    "ECX is variable a"
+
+
+It means:
+
+    "the value corresponding to a is currently in ECX
+     under this ABI/calling context."
+
+
+Compiler may move it:
+
+    mov eax, ecx
+
+
+Now:
+
+    EAX contains the value.
+
+
+Variable name "a" may disappear completely from optimized machine code.
+
+
+===============================================================================
+153. OPTIMIZATION
+===============================================================================
+
+C:
+
+    int add(int a, int b)
+    {
+        return a + b;
+    }
+
+
+Compiler may generate:
+
+    lea eax, [rdi + rsi]
+
+
+instead of:
+
+    mov eax, edi
+    add eax, esi
+
+
+Both can represent the same computation.
+
+
+Therefore:
+
+    C source structure
+        !=
+    exact assembly structure
+
+
+===============================================================================
+154. INLINE FUNCTIONS
+===============================================================================
+
+Compiler may completely eliminate:
+
+    call
+
+
+and inline function body.
+
+
+Then no actual function-call register transfer may exist at runtime.
+
+
+This is why reverse engineering must reason about generated machine code,
+not only source code.
+
+
+===============================================================================
+155. TAIL CALL
+===============================================================================
+
+A function may replace:
+
+    call target
+    ret
+
+
+with something like:
+
+    jmp target
+
+
+when ABI/stack conditions allow it.
+
+
+This is:
+
+    tail call
+
+
+Call stack behavior becomes different.
+
+
+===============================================================================
+156. RECURSION
+===============================================================================
+
+Function calls itself:
+
+    call function
+
+
+Each invocation normally needs its own:
+
+    return state
+    locals
+    saved state
+
+
+Stack is therefore important for recursion.
+
+
+===============================================================================
+157. STACK OVERFLOW
+===============================================================================
+
+Too much stack usage:
+
+    recursion
+    huge local arrays
+    deep call chains
+
+
+can exhaust stack memory.
+
+
+Stack size is OS/runtime dependent.
+
+
+===============================================================================
+158. HEAP
+===============================================================================
+
+Heap is dynamically allocated memory.
+
+
+C:
+
+    malloc
+    free
+
+
+C++:
+
+    new
+    delete
+
+
+Modern C++ often uses:
+
+    RAII
+    smart pointers
+
+
+Assembly can call allocator APIs if ABI is followed.
+
+
+===============================================================================
+159. MEMORY ALLOCATION IS NOT AN ASSEMBLY FEATURE
+===============================================================================
+
+NASM itself does not provide:
+
+    malloc
+
+
+NASM creates machine-code/data object files.
+
+
+Allocation comes from:
+
+    OS
+    runtime
+    libc
+    Windows APIs
+    custom allocator
+
+
+===============================================================================
+160. FILE I/O
+===============================================================================
+
+Assembly itself does not magically provide:
+
+    fopen
+    CreateFile
+    read
+    write
+
+
+These are APIs/system interfaces.
+
+
+Assembly can call them.
+
+
+For portability:
+
+    C/C++ standard library
+    OS APIs
+
+are usually easier.
+
+
+===============================================================================
+161. WINDOWS vs LINUX vs macOS APIs
+===============================================================================
+
+Windows:
+
+    Win32
+    Windows SDK
+    NT interfaces
+
+
+Linux:
+
+    POSIX
+    libc
+    Linux syscalls
+
+
+macOS:
+
+    POSIX
+    libc
+    Apple frameworks/APIs
+
+
+Assembly layer must obey the relevant OS ABI.
+
+
+===============================================================================
+162. ASSEMBLY PORTABILITY
+===============================================================================
+
+This:
+
+    mov eax, edi
+
+
+is not portable between:
+
+    Windows x64
+    SysV x86-64
+
+
+because argument register differs.
+
+
+Portable assembly requires:
+
+    architecture
+    OS
+    ABI
+    object format
+    linker
+    symbol conventions
+
+to all match.
+
+
+===============================================================================
+163. NASM vs MASM
+===============================================================================
+
+NASM:
+
+    Intel-style syntax
+    cross-platform
+    independent assembler
+
+
+MASM:
+
+    Microsoft Macro Assembler
+    Microsoft ecosystem
+
+
+Both are Intel syntax families but syntax/directives differ.
+
+
+Do not mix NASM directives with MASM syntax blindly.
+
+
+===============================================================================
+164. NASM vs GAS
+===============================================================================
+
+NASM:
+
+    Intel-style
+
+
+GAS commonly:
+
+    AT&T syntax
+
+but GAS can also support Intel syntax modes.
+
+
+Example conceptual difference:
+
+NASM:
+
+    mov eax, ebx
+
+
+AT&T:
+
+    movl %ebx, %eax
+
+
+NASM:
+
+    destination, source
+
+
+AT&T:
+
+    source, destination
+
+
+===============================================================================
+165. CMAKE
+===============================================================================
+
+CMake is build-system generation/orchestration.
+
+
+It can coordinate:
+
+    C/C++
+    NASM
+    linker
+    libraries
+    tests
+
+
+Conceptual:
+
+    CMake
+      |
+      +--> C compiler
+      |
+      +--> NASM
+      |
+      +--> linker
+      |
+      v
+    executable
+
+
+CMake itself is NOT:
+
+    compiler
+    assembler
+    linker
+
+
+===============================================================================
+166. ASSEMBLY + CMAKE ARCHITECTURE
+===============================================================================
+
+Project:
+
+    project/
+    |
+    +-- CMakeLists.txt
+    |
+    +-- src/
+         |
+         +-- main.cpp
+         +-- add.asm
+
+
+Build:
+
+    CMake
+       |
+       +--> compiler -> main.obj / main.o
+       |
+       +--> NASM     -> add.obj / add.o
+       |
+       +--------------+
+                      |
+                      v
+                    linker
+                      |
+                      v
+                  executable
+
+
+===============================================================================
+167. STATIC LIBRARY ARCHITECTURE
+===============================================================================
+
+    add.asm
+       |
+       v
+    NASM
+       |
+       v
+    add.obj / add.o
+       |
+       v
+    librarian
+       |
+       v
+    math.lib / libmath.a
+       |
+       v
+    C/C++ application
+       |
+       v
+    linker
+       |
+       v
+    executable
+
+
+===============================================================================
+168. SYMBOL TABLE
+===============================================================================
+
+Object files contain symbols such as:
+
+    add
+    main
+    external_function
+
+
+Symbol table helps linker understand:
+
+    who defines what
+    who references what
+
+
+===============================================================================
+169. RELOCATION TABLE
+===============================================================================
+
+If final address isn't known during assembly:
+
+    relocation entry
+
+
+Linker later adjusts the machine code/data.
+
+
+Common examples:
+
+    function calls
+    global variables
+    external symbols
+
+
+===============================================================================
+170. DEBUGGING ASSEMBLY
+===============================================================================
+
+Important things to inspect:
+
+    RIP
+    RSP
+    RBP
+    RAX
+    RCX
+    RDX
+    RDI
+    RSI
+    R8-R15
+    XMM registers
+    RFLAGS
+    stack memory
+
+
+Debugging question:
+
+    "Where is the value?"
+
+Possible answer:
+
+    register
+    stack
+    heap
+    global memory
+    structure field
+
+
+===============================================================================
+171. DISASSEMBLER QUESTIONS
+===============================================================================
+
+When looking at assembly ask:
+
+    1. What ABI?
+    2. What function?
+    3. What are argument locations?
+    4. What is RSP doing?
+    5. Which registers are saved?
+    6. Where are locals?
+    7. Where is return value?
+    8. Which flags are used?
+    9. What memory addresses are accessed?
+   10. Is this optimized code?
+
+
+===============================================================================
+172. REVERSE-ENGINEERING MENTAL MODEL
+===============================================================================
+
+Machine code:
+
+    bytes
+      |
+      v
+    instructions
+      |
+      v
+    control flow
+      |
+      v
+    data flow
+      |
+      v
+    ABI
+      |
+      v
+    probable C/C++ semantics
+
+
+Never assume assembly contains:
+
+    original variable names
+    original comments
+    original types
+    original structure exactly
+
+
+Optimization may destroy source-level structure.
+
+
+===============================================================================
+173. SECURITY RELEVANCE
+===============================================================================
+
+Assembly knowledge is fundamental for understanding:
+
+    stack corruption
+    buffer overflows
+    calling conventions
+    memory corruption
+    ROP
+    DEP/NX
+    ASLR
+    stack cookies
+    control-flow protection
+
+
+Defensive understanding is especially important for systems programming.
+
+
+===============================================================================
+174. STACK COOKIE / CANARY
+===============================================================================
+
+Compilers can insert protection values around stack locals.
+
+
+Conceptually:
+
+    local buffer
+    canary
+    saved state
+    return address
+
+
+Before returning:
+
+    check canary
+
+
+If corrupted:
+
+    terminate/fail safely
+
+
+Implementation differs by compiler/OS.
+
+
+===============================================================================
+175. CONTROL-FLOW PROTECTION
+===============================================================================
+
+Modern systems may use:
+
+    CFG
+    CET
+    shadow stacks
+    indirect branch protections
+
+
+Purpose:
+
+    make control-flow hijacking harder.
+
+
+Exact availability depends on:
+
+    CPU
+    OS
+    compiler
+    binary configuration.
+
+
+===============================================================================
+176. IMPORTANT NASM KEYWORDS
+===============================================================================
+
+    section
+    global
+    extern
+    db
+    dw
+    dd
+    dq
+    resb
+    resw
+    resd
+    resq
+    times
+    equ
+    align
+
+
+===============================================================================
+177. TIMES
+===============================================================================
+
+Example:
+
+    times 10 db 0
+
+
+means approximately:
+
+    emit 10 zero bytes.
+
+
+Useful for:
+
+    arrays
+    padding
+    tables
+
+
+===============================================================================
+178. EQU
+===============================================================================
+
+Example:
+
+    BUFFER_SIZE equ 1024
+
+
+Then:
+
+    times BUFFER_SIZE db 0
+
+
+EQU defines an assembler-time constant.
+
+
+===============================================================================
+179. ALIGN
+===============================================================================
+
+Example:
+
+    align 16
+
+
+requests alignment.
+
+
+Useful for:
+
+    code
+    data
+    SIMD-related layouts
+
+
+Exact emitted padding depends on assembler/object context.
+
+
+===============================================================================
+180. NASM MACROS
+===============================================================================
+
+NASM supports macros.
+
+
+Conceptually:
+
+    %define
+
+
+and macro constructs.
+
+
+Useful for:
+
+    repetitive assembly
+    constants
+    code generation
+
+
+But macros are assembler preprocessing features,
+not CPU instructions.
+
+
+===============================================================================
+181. CPU MODES
+===============================================================================
+
+Relevant x86 modes:
+
+    Real Mode
+    Protected Mode
+    Long Mode
+
+
+x86-64 operating systems normally run user code in:
+
+    64-bit long mode
+
+
+Legacy compatibility modes also exist.
+
+
+===============================================================================
+182. 32-BIT vs 64-BIT
+===============================================================================
+
+32-bit:
+
+    EAX
+    EBX
+    ECX
+    EDX
+    ...
+
+64-bit:
+
+    RAX
+    RBX
+    RCX
+    RDX
+    ...
+
+
+64-bit mode provides:
+
+    64-bit GPRs
+    more registers
+    64-bit addresses
+    RIP-relative addressing
+    modern instruction extensions
+
+
+===============================================================================
+183. 16-BIT / 8-BIT ARE NOT "CPU MODES"
+===============================================================================
+
+Using:
+
+    AX
+    AL
+
+does NOT switch CPU to 16-bit/8-bit mode.
+
+
+They are simply operand-width views in 64-bit mode.
+
+
+Very important distinction.
+
+
+===============================================================================
+184. MEMORY SIZE vs REGISTER SIZE
+===============================================================================
+
+Example:
+
+    mov eax, [rbx]
+
+
+Register:
+
+    EAX = 32-bit
+
+
+Memory operand:
+
+    32-bit because destination determines size.
+
+
+For ambiguous memory:
+
+    mov dword [rbx], 10
+
+
+Explicitly tells assembler:
+
+    write 32 bits.
+
+
+===============================================================================
+185. BYTE / WORD / DWORD / QWORD
+===============================================================================
+
+    BYTE  = 8
+    WORD  = 16
+    DWORD = 32
+    QWORD = 64
+
+
+Relation:
+
+    1 BYTE  = 8 bits
+    1 WORD  = 2 bytes
+    1 DWORD = 4 bytes
+    1 QWORD = 8 bytes
+
+
+===============================================================================
+186. REGISTER + TYPE CHEAT SHEET
+===============================================================================
+
+C char:
+
+    BYTE
+    8-bit register view
+
+
+C short:
+
+    WORD
+    16-bit register view
+
+
+C int:
+
+    DWORD
+    32-bit register view
+
+
+C long long:
+
+    QWORD
+    64-bit register view
+
+
+Pointer:
+
+    QWORD-sized address
+
+
+float:
+
+    32-bit FP representation
+    normally XMM register
+
+
+double:
+
+    64-bit FP representation
+    normally XMM register
+
+
+===============================================================================
+187. IMPORTANT: NASM HAS NO C TYPES
+===============================================================================
+
+NASM does NOT inherently know:
+
+    int
+    char
+    short
+    class
+    std::string
+    vector
+    bool
+
+
+NASM mainly knows:
+
+    bytes
+    symbols
+    expressions
+    sections
+    instructions
+    registers
+    memory operands
+
+
+C/C++ meaning must be represented manually or via ABI contract.
+
+
+===============================================================================
+188. ASSEMBLY FUNCTION CONTRACT
+===============================================================================
+
+A function can be thought of as:
+
+    INPUT CONTRACT
+        |
+        +--> argument locations
+        +--> argument types/widths
+        +--> stack requirements
+        |
+        v
+      FUNCTION
+        |
+        +--> preserve required registers
+        +--> modify allowed registers
+        |
+        v
+    OUTPUT CONTRACT
+        |
+        +--> return register
+        +--> memory side effects
+
+
+That contract is ABI.
+
+
+===============================================================================
+189. FUNCTION EXAMPLE
+===============================================================================
+
+C:
+
+    long long add64(long long a, long long b);
+
+
+Windows:
+
+    a -> RCX
+    b -> RDX
+    result -> RAX
+
+
+NASM:
+
+    global add64
+
+    section .text
+
+    add64:
+        mov rax, rcx
+        add rax, rdx
+        ret
+
+
+Linux/macOS:
+
+    a -> RDI
+    b -> RSI
+
+
+NASM:
+
+    global add64
+
+    section .text
+
+    add64:
+        mov rax, rdi
+        add rax, rsi
+        ret
+
+
+===============================================================================
+190. FLOAT EXAMPLE
+===============================================================================
+
+C:
+
+    double add(double a, double b);
+
+
+SysV:
+
+    XMM0 = a
+    XMM1 = b
+
+    result -> XMM0
+
+
+Assembly concept:
+
+    addsd xmm0, xmm1
+    ret
+
+
+Windows:
+
+    corresponding first two FP argument positions:
+
+    XMM0
+    XMM1
+
+and result:
+
+    XMM0
+
+
+===============================================================================
+191. POINTER EXAMPLE
+===============================================================================
+
+C:
+
+    long long read(long long *p);
+
+
+Windows:
+
+    p -> RCX
+
+
+NASM:
+
+    mov rax, [rcx]
+    ret
+
+
+Linux/macOS:
+
+    p -> RDI
+
+
+NASM:
+
+    mov rax, [rdi]
+    ret
+
+
+===============================================================================
+192. ARRAY LOOP EXAMPLE
+===============================================================================
+
+C:
+
+    int sum(int *a, int n);
+
+
+Windows:
+
+    a -> RCX
+    n -> RDX
+
+
+Linux/macOS:
+
+    a -> RDI
+    n -> RSI
+
+
+Conceptual loop:
+
+    sum = 0
+    i = 0
+
+    while i < n:
+
+        sum += a[i]
+
+        i++
+
+
+Assembly must calculate:
+
+    a + i*4
+
+
+===============================================================================
+193. ABI DOES NOT TELL YOU EVERYTHING
+===============================================================================
+
+ABI does not mean:
+
+    "all programs use exactly this assembly."
+
+
+Compiler may choose:
+
+    different instructions
+    different register allocation
+    different stack layout
+    inlining
+    vectorization
+    tail calls
+
+
+ABI defines the externally visible contract,
+not every internal instruction.
+
+
+===============================================================================
+194. COMPILER REGISTER ALLOCATION
+===============================================================================
+
+Compiler may receive:
+
+    a -> RCX
+
+
+then:
+
+    mov rax, rcx
+
+
+and later:
+
+    register no longer represents "a"
+
+
+The compiler may reuse registers.
+
+
+Therefore source variable identity is not permanent at machine level.
+
+
+===============================================================================
+195. OPTIMIZED ASSEMBLY
+===============================================================================
+
+C:
+
+    int square(int x)
+    {
+        return x * x;
+    }
+
+
+Could become:
+
+    imul eax, edi
+
+
+or other equivalent machine code depending on ABI/compiler.
+
+
+Do not memorize one assembly sequence as "the C meaning."
+
+
+Learn:
+
+    data flow
+    control flow
+    ABI
+    instruction semantics
+
+
+===============================================================================
+196. LEARNING ORDER
+===============================================================================
+
+Recommended order:
+
+    1. Binary / hexadecimal
+    2. Bits / bytes
+    3. Registers
+    4. Memory
+    5. MOV
+    6. Arithmetic
+    7. Flags
+    8. CMP / TEST
+    9. Conditional jumps
+   10. CALL / RET
+   11. Stack
+   12. Functions
+   13. ABI
+   14. C <-> Assembly
+   15. Object files
+   16. Linker
+   17. Static libraries
+   18. Dynamic libraries
+   19. OS APIs
+   20. SIMD
+   21. Atomics
+   22. Performance
+   23. Compiler internals
+   24. Reverse engineering
+   25. OS/kernel-level assembly
+
+
+===============================================================================
+197. MASTER QUESTION SET
+===============================================================================
+
+When you see assembly, ask:
+
+    What architecture?
+
+        x86-64?
+
+
+    What assembler syntax?
+
+        NASM?
+
+
+    What OS?
+
+        Windows?
+        Linux?
+        macOS?
+
+
+    What ABI?
+
+        Microsoft x64?
+        SysV AMD64?
+
+
+    What is the data width?
+
+        8?
+        16?
+        32?
+        64?
+        128?
+        256?
+        512?
+
+
+    Where is the argument?
+
+        register?
+        stack?
+
+
+    What is the register view?
+
+        RCX?
+        ECX?
+        CX?
+        CL?
+
+
+    Is it a value or address?
+
+        RAX?
+        [RAX]?
+
+
+    What flags are modified?
+
+        ZF?
+        CF?
+        OF?
+        SF?
+
+
+    Is the register caller/callee saved?
+
+
+    What is RSP doing?
+
+
+    What is the return register?
+
+
+    Is this optimized?
+
+
+===============================================================================
+198. GOLDEN RULES
+===============================================================================
+
+RULE 1:
+
+    Registers are not C variables.
+
+
+RULE 2:
+
+    ABI defines function-call contracts.
+
+
+RULE 3:
+
+    RCX and ECX are different-width views of one register family.
+
+
+RULE 4:
+
+    32-bit GPR writes zero-extend to 64-bit.
+
+
+RULE 5:
+
+    8/16-bit writes do not generally zero upper bits.
+
+
+RULE 6:
+
+    [RAX] means memory at address RAX.
+
+
+RULE 7:
+
+    RAX means the register value itself.
+
+
+RULE 8:
+
+    Windows x64 != SysV AMD64.
+
+
+RULE 9:
+
+    Windows has 32-byte shadow/home space.
+
+
+RULE 10:
+
+    SysV has a 128-byte red zone in applicable user-space code.
+
+
+RULE 11:
+
+    C/C++ types are not NASM types.
+
+
+RULE 12:
+
+    Struct/aggregate ABI rules are more complicated than
+    simple integer register mapping.
+
+
+RULE 13:
+
+    macOS Intel x86-64 != Apple Silicon ARM64.
+
+
+RULE 14:
+
+    Assembly source != machine code.
+
+
+RULE 15:
+
+    Machine code != original C source.
+
+
+RULE 16:
+
+    Linker resolves symbols and relocations.
+
+
+RULE 17:
+
+    CALL/RET are part of function-control flow,
+    not merely "jump instructions."
+
+
+RULE 18:
+
+    Performance depends on microarchitecture,
+    not only instruction count.
+
+
+RULE 19:
+
+    Do not mix ABIs.
+
+
+RULE 20:
+
+    Always know:
+        architecture + OS + ABI + assembler + object format.
+
+
+===============================================================================
+199. ONE-PAGE MASTER CHEAT SHEET
+===============================================================================
+
+
+x86-64 GPR:
+
+    RAX  EAX  AX  AL
+    RBX  EBX  BX  BL
+    RCX  ECX  CX  CL
+    RDX  EDX  DX  DL
+
+    RSI  ESI  SI  SIL
+    RDI  EDI  DI  DIL
+
+    R8   R8D  R8W  R8B
+    R9   R9D  R9W  R9B
+    R10  R10D R10W R10B
+    R11  R11D R11W R11B
+    R12  R12D R12W R12B
+    R13  R13D R13W R13B
+    R14  R14D R14W R14B
+    R15  R15D R15W R15B
+
+
+SPECIAL:
+
+    RSP   = stack pointer
+    RBP   = frame/base pointer
+    RIP   = instruction pointer
+    RFLAGS = flags
+
+
+WINDOWS:
+
+    args:
+        RCX RDX R8 R9
+        stack...
+
+    return:
+        RAX
+        XMM0
+
+    shadow:
+        32 bytes
+
+
+LINUX:
+
+    args:
+        RDI RSI RDX RCX R8 R9
+        stack...
+
+    return:
+        RAX
+        XMM0
+
+    no Windows shadow space
+    SysV red zone
+
+
+macOS Intel:
+
+    args:
+        RDI RSI RDX RCX R8 R9
+        stack...
+
+    return:
+        RAX
+        XMM0
+
+    SysV-derived
+    no Windows shadow space
+    SysV red zone
+
+
+DATA:
+
+    BYTE  = 8
+    WORD  = 16
+    DWORD = 32
+    QWORD = 64
+
+    float  = 32
+    double = 64
+    ptr    = 64
+
+
+CORE INSTRUCTIONS:
+
+    mov
+    lea
+    add
+    sub
+    inc
+    dec
+    imul
+    mul
+    idiv
+    div
+    neg
+
+    and
+    or
+    xor
+    not
+
+    shl
+    shr
+    sar
+
+    cmp
+    test
+
+    jmp
+    je
+    jne
+    jg
+    jl
+    ja
+    jb
+
+    call
+    ret
+
+    push
+    pop
+
+
+SIMD:
+
+    XMM = 128
+    YMM = 256
+    ZMM = 512
+
+
+OBJECTS:
+
+    Windows -> PE/COFF -> .obj
+    Linux   -> ELF     -> .o
+    macOS   -> Mach-O  -> .o
+
+
+STATIC:
+
+    Windows -> .lib
+    Linux   -> .a
+    macOS   -> .a
+
+
+DYNAMIC:
+
+    Windows -> .dll
+    Linux   -> .so
+    macOS   -> .dylib
+
+
+===============================================================================
+200. FINAL MENTAL MODEL
+===============================================================================
+
+
+                         C / C++
+                            |
+                            v
+                     C/C++ DATA TYPE
+                            |
+                            v
+                 +-----------------------+
+                 |       ABI             |
+                 |                       |
+                 | argument location     |
+                 | return location       |
+                 | register preservation |
+                 | stack rules           |
+                 +-----------------------+
+                            |
+                            v
+                     x86-64 REGISTERS
+                            |
+          +-----------------+-----------------+
+          |                 |                 |
+          v                 v                 v
+        GPR               XMM               STACK
+          |                 |                 |
+          v                 v                 v
+     RAX/RCX/...       XMM0-XMM15        RSP/RBP
+          |                 |                 |
+          +-----------------+-----------------+
+                            |
+                            v
+                       NASM CODE
+                            |
+                            v
+                      MACHINE CODE
+                            |
+                            v
+                       OBJECT FILE
+                            |
+                            v
+                         LINKER
+                            |
+                            v
+                 +----------+----------+
+                 |                     |
+                 v                     v
+              WINDOWS              LINUX/macOS
+                 |                     |
+               PE/COFF              ELF/Mach-O
+                 |                     |
+                 v                     v
+             EXECUTABLE            EXECUTABLE
+
+
+THE CORE IDEA:
+
+    C/C++ says WHAT the program means.
+
+    ABI says HOW functions communicate at binary level.
+
+    NASM says HOW to express x86 machine instructions.
+
+    Assembler converts NASM -> object code.
+
+    Linker connects object files/libraries.
+
+    Loader creates the process.
+
+    CPU executes machine-code instructions.
+
+================================================================================
+                         END OF MASTER CRASH COURSE
+================================================================================

@@ -1,0 +1,26 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.o
+*.obj
+
+# Precompiled headers
+*.gch
+*.pch
+
+# CMake temporary files & local build outputs
+build/
+CMakeCache.txt
+CMakeFiles/
+CMakeCheckOutputs/
+Makefile
+cmake_install.cmake
+
+# MSVC local files (if using Visual Studio)
+.vs/
+Out/
+
+# Environment configurations & Secrets
+.env
+*.user
