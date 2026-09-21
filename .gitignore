@@ -24,3 +24,6 @@ Out/
 # Environment configurations & Secrets
 .env
 *.user
+
+#Other
+Core_Foundation/
