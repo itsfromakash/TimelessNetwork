@@ -24,8 +24,14 @@ Out/
 # Environment configurations & Secrets
 .env
 *.user
+*.exe
+*.exe
+*.dll
+*.so
+*.dylib
 
 #Other
 Core_Foundation/
 src/Core/Fuck
+src/TimelessNetwork/TimelessNetwork.exe
 setup.ps1
