@@ -37,6 +37,5 @@ Out/
 
 # Project Specific Ignored Folders & Files
 Core_Foundation/
-src/Core/Fuck
 src/Core/
 Version.txt
