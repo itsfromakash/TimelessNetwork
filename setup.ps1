@@ -6,14 +6,14 @@ if (Test-Path "$RootDir\build") { Remove-Item -Recurse -Force "$RootDir\build" }
 New-Item -ItemType Directory -Force -Path "include", "lib", "build" | Out-Null
 
 # 2. Go P2P File එක ඇති exact location එකට යාම
-$GoDir = "$RootDir\src\TimelessNetwork\p2p"
+$GoDir = "$RootDir\src\TimelessNetwork"
 Write-Host "[BUILD] Navigating to Go directory: $GoDir" -ForegroundColor Cyan
 
 Set-Location $GoDir
 
 # 3. Go Static Library එක Build කිරීම
 Write-Host "[BUILD] Compiling Go P2P Engine to static library..." -ForegroundColor Cyan
-go build -buildmode=c-archive -o "$RootDir\lib\p2p_engine.a" P2P.go
+go build -buildmode=c-archive -o "$RootDir\lib\p2p_engine.a" main.go
 
 if (Test-Path "$RootDir\lib\p2p_engine.h") {
     Move-Item -Path "$RootDir\lib\p2p_engine.h" -Destination "$RootDir\include\p2p_engine.h" -Force
