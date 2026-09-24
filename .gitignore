@@ -1,15 +1,23 @@
-# Prerequisites
+# Prerequisites & Compiles
 *.d
-
-# Compiled Object files
 *.o
 *.obj
-
-# Precompiled headers
 *.gch
 *.pch
 
-# CMake temporary files & local build outputs
+# Built Executables & Static/Dynamic Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Generated Libraries & Headers
+lib/
+include/p2p_engine.h
+
+# CMake & Local Build Outputs
 build/
 CMakeCache.txt
 CMakeFiles/
@@ -17,28 +25,18 @@ CMakeCheckOutputs/
 Makefile
 cmake_install.cmake
 
-# MSVC local files (if using Visual Studio)
+# IDEs & Editors Configuration
 .vs/
 Out/
+.vscode/
+.idea/
 
 # Environment configurations & Secrets
 .env
 *.user
-*.exe
-*.exe
-*.dll
-*.so
-*.dylib
 
-#Other
+# Project Specific Ignored Folders & Files
 Core_Foundation/
 src/Core/Fuck
-src/TimelessNetwork/TimelessNetwork.exe
+src/Core/
 Version.txt
-src/Core
-
-build/
-lib/
-include/p2p_engine.h
-*.exe
-*.a
