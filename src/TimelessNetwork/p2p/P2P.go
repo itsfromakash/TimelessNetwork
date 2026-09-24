@@ -16,11 +16,11 @@ func F_p2p() {
 
 	startTime := time.Now()
 
-	// 1. OS Signals (Ctrl+C, SIGTERM) අල්ලා ගැනීමට Context එකක් සාදා ගැනීම
+	// 1. Create a context to capture OS signals (Ctrl+C, SIGTERM)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop() // Function එක අවසන් වන විට signal notification අක්‍රිය කරයි
+	defer stop() // Disable signal notification when the function completes
 
-	// 2. STUN සහ TURN Servers Configuration
+	// 2. Configure STUN and TURN Servers
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
@@ -35,13 +35,13 @@ func F_p2p() {
 		},
 	}
 
-	// 3. Peer Connection එක සෑදීම
+	// 3. Create the PeerConnection
 	peerConnection, err := webrtc.NewPeerConnection(config)
 	if err != nil {
 		panic(err)
 	}
 
-	// Graceful Cleanup: Program එක අවසන් වන විට Connection එක නිසි පරිදි ක්ලෝස් වේ
+	// Graceful Cleanup: Ensure the connection is properly closed upon exit
 	defer func() {
 		fmt.Println("\nClosing PeerConnection safely...")
 		if err := peerConnection.Close(); err != nil {
@@ -62,13 +62,13 @@ func F_p2p() {
 		}
 	})
 
-	// 5. Data Channel එක නිර්මාණය
+	// 5. Create a Data Channel
 	_, err = peerConnection.CreateDataChannel("chat", nil)
 	if err != nil {
 		panic(err)
 	}
 
-	// 6. Offer එක සාදා Local Description එක set කිරීම
+	// 6. Create Offer and set Local Description
 	fmt.Println("Starting ICE gathering process (creating local offer)...")
 	offer, err := peerConnection.CreateOffer(nil)
 	if err != nil {
@@ -80,10 +80,10 @@ func F_p2p() {
 		panic(err)
 	}
 
-	// 7. select {} වෙනුවට OS Signal එකක් එනතෙක් Block වී සිටීම
+	// 7. Block and wait for an OS signal instead of an empty select {}
 	fmt.Println("Application is running. Press Ctrl+C to stop safely...")
 
-	<-ctx.Done() // Ctrl+C (SIGINT) හෝ SIGTERM ලැබෙන තෙක් මෙතන නතර වී පවතී
+	<-ctx.Done() // Waits here until Ctrl+C (SIGINT) or SIGTERM is received
 
 	fmt.Println("\nShutdown signal received! Cleaning up resources...")
 }
