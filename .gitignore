@@ -36,3 +36,9 @@ src/Core/Fuck
 src/TimelessNetwork/TimelessNetwork.exe
 Version.txt
 src/Core
+
+build/
+lib/
+include/p2p_engine.h
+*.exe
+*.a

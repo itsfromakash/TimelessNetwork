@@ -1,19 +1,43 @@
-# 1. Folders සාදා ගැනීම
+$RootDir = Get-Location
+
+# 1. Clean Build Directories
+Write-Host "[CLEAN] Cleaning old build files..." -ForegroundColor Yellow
+if (Test-Path "$RootDir\build") { Remove-Item -Recurse -Force "$RootDir\build" }
 New-Item -ItemType Directory -Force -Path "include", "lib", "build" | Out-Null
 
-# 2. Go Code එක C Static Library එකක් ලෙස Compile කිරීම
-Write-Host "[BUILD] Compiling Go P2P Engine to .a static library..." -ForegroundColor Cyan
-Set-Location src/P2P
-go build -buildmode=c-archive -o "../../lib/p2p_engine.a" p2p.go
-Move-Item -Path "../../lib/p2p_engine.h" -Destination "../../include/p2p_engine.h" -Force
-Set-Location ../..
+# 2. Go P2P File එක ඇති exact location එකට යාම
+$GoDir = "$RootDir\src\TimelessNetwork\p2p"
+Write-Host "[BUILD] Navigating to Go directory: $GoDir" -ForegroundColor Cyan
 
-# 3. CMake හරහා C++ Executable එක Compile කිරීම
+Set-Location $GoDir
+
+# 3. Go Static Library එක Build කිරීම
+Write-Host "[BUILD] Compiling Go P2P Engine to static library..." -ForegroundColor Cyan
+go build -buildmode=c-archive -o "$RootDir\lib\p2p_engine.a" P2P.go
+
+if (Test-Path "$RootDir\lib\p2p_engine.h") {
+    Move-Item -Path "$RootDir\lib\p2p_engine.h" -Destination "$RootDir\include\p2p_engine.h" -Force
+}
+
+# 4. Root එකට පැමිණ CMake හරහා C++ Executable එක Compile කිරීම
+Set-Location "$RootDir\build"
 Write-Host "[BUILD] Building C++ Core Engine executable..." -ForegroundColor Cyan
-Set-Location build
-cmake -G "MinGW Makefiles" ..
+
+cmake -G "MinGW Makefiles" ".."
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] CMake configuration failed!" -ForegroundColor Red
+    Set-Location $RootDir
+    return
+}
+
 cmake --build .
-Set-Location ..
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Compilation failed!" -ForegroundColor Red
+    Set-Location $RootDir
+    return
+}
+
+Set-Location $RootDir
 
 Write-Host "`n[SUCCESS] Build Completed Successfully!" -ForegroundColor Green
 Write-Host "Run command: .\build\TimelessNetworkApp.exe" -ForegroundColor Yellow
